@@ -16,6 +16,9 @@ out vec2  v_st;
 out float v_width;
 out vec4 v_pickColor;
 out float v_polylineAngle;
+// @uranus change \u65B0\u589E\u53D8\u91CF\u7528\u6765\u8BA1\u7B97\u8FB9\u7F18\u6297\u952F\u9F7F
+out float v_aa_width;
+out float v_aa_out;
 
 void main()
 {
@@ -24,8 +27,13 @@ void main()
     bool usePrev = texCoordExpandAndBatchIndex.z < 0.0;
     float batchTableIndex = texCoordExpandAndBatchIndex.w;
 
+    // @uranus change: \u8BA1\u7B97\u5916\u6269\u53D8\u91CF
+    v_aa_out = 1.0 / czm_pixelRatio; // \u7EBF\u6BB5\u9876\u70B9\u5916\u6269\u4E24\u4E2A\u50CF\u7D20
+    float width_out = v_aa_out * 2.0;
+    // @uranus change end
     vec2 widthAndShow = batchTable_getWidthAndShow(batchTableIndex);
-    float width = widthAndShow.x + 0.5;
+    // @uranus change \u5BBD\u5EA6\u5916\u6269
+    float width = widthAndShow.x + 0.5 + width_out;
     float show = widthAndShow.y;
 
     if (width < 1.0)
@@ -97,7 +105,10 @@ void main()
     v_st.s = texCoord;
     v_st.t = czm_writeNonPerspective(clamp(expandDir, 0.0, 1.0), gl_Position.w);
 
-    v_width = width;
+    // @uranus change: \u8BA1\u7B97\u5916\u6269\u53D8\u91CF
+    v_width = width - width_out;
+    v_aa_width = width;
+    // @uranus change end
     v_pickColor = pickColor;
     v_polylineAngle = polylineAngle;
 }

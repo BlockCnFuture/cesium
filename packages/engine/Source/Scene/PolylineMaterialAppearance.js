@@ -4,12 +4,12 @@ import FeatureDetection from "../Core/FeatureDetection.js";
 import VertexFormat from "../Core/VertexFormat.js";
 import PolylineMaterialAppearanceVS from "../Shaders/Appearances/PolylineMaterialAppearanceVS.js";
 import PolylineCommon from "../Shaders/PolylineCommon.js";
-import PolylineFS from "../Shaders/PolylineFS.js";
+import PolylineMaterialAppearanceFS from "../Shaders/Appearances/PolylineMaterialAppearanceFS.js";
 import Appearance from "./Appearance.js";
 import Material from "./Material.js";
 
 let defaultVertexShaderSource = `${PolylineCommon}\n${PolylineMaterialAppearanceVS}`;
-const defaultFragmentShaderSource = PolylineFS;
+const defaultFragmentShaderSource = PolylineMaterialAppearanceFS;
 
 if (!FeatureDetection.isInternetExplorer()) {
   defaultVertexShaderSource = `#define CLIP_POLYLINE \n${defaultVertexShaderSource}`;

@@ -25,6 +25,10 @@ out vec4 v_rightPlaneEC;
 out vec4 v_endEcAndStartEcX;
 out vec4 v_texcoordNormalizationAndStartEcYZ;
 
+// @uranus change \u65B0\u589E\u53D8\u91CF\u7528\u6765\u8BA1\u7B97\u8FB9\u7F18\u6297\u952F\u9F7F
+out float v_aa_width;
+out float v_aa_out;
+
 // For materials
 #ifdef WIDTH_VARYING
 out float v_width;
@@ -119,6 +123,11 @@ void main()
 
     v_texcoordNormalizationAndStartEcYZ.y = czm_branchFreeTernary(v_texcoordNormalizationAndStartEcYZ.y > 1.0, 0.0, abs(v_texcoordNormalizationAndStartEcYZ.y));
 
+    // @uranus change: \u8BA1\u7B97\u5916\u6269\u53D8\u91CF
+    v_aa_out = 1.0 / czm_pixelRatio; // \u7EBF\u6BB5\u9876\u70B9\u5916\u6269\u4E24\u4E2A\u50CF\u7D20
+    float width_out = v_aa_out * 2.0;
+    // @uranus change end
+
     // Determine distance along normalEC to push for a volume of appropriate width.
     // Make volumes about double pixel width for a conservative fit - in practice the
     // extra cost here is minimal compared to the loose volume heights.
@@ -130,15 +139,19 @@ void main()
     // d = distance to push along N
     //
     //   N   R
-    //  { \ p| }      * cos(p) = dot(N, R) = w / d
-    //  d\ \ |  |w    * d = w / dot(N, R)
-    //    { \| }
+    //  {  p| }      * cos(p) = dot(N, R) = w / d
+    //  d  |  |w    * d = w / dot(N, R)
+    //    { | }
     //       o---------- polyline segment ---->
     //
-    float width = czm_batchTable_width(batchId);
+    // @uranus change \u5BBD\u5EA6\u5916\u6269
+    float width = czm_batchTable_width(batchId) + width_out;
 #ifdef WIDTH_VARYING
-    v_width = width;
+    // @uranus change: \u8BA1\u7B97\u5916\u6269\u53D8\u91CF
+    v_width = width - width_out;
 #endif
+    // @uranus change: \u8BA1\u7B97\u5916\u6269\u53D8\u91CF
+    v_aa_width = width;
 
     v_startPlaneNormalEcAndHalfWidth.xyz = startPlaneEC.xyz;
     v_startPlaneNormalEcAndHalfWidth.w = width * 0.5;
