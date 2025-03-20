@@ -12,6 +12,7 @@ import NearFarScalar from "../Core/NearFarScalar.js";
 import SceneMode from "./SceneMode.js";
 import SceneTransforms from "./SceneTransforms.js";
 import SplitDirection from "./SplitDirection.js";
+import Check from "../Core/Check.js";
 
 /**
  * <div class="notice">
@@ -112,6 +113,8 @@ function PointPrimitive(options, pointPrimitiveCollection) {
   this._id = options.id;
   this._collection = defaultValue(options.collection, pointPrimitiveCollection);
 
+  this._depthFailTranslucency = defaultValue(options.depthFailTranslucency, 0);
+
   this._clusterShow = true;
 
   this._pickId = undefined;
@@ -139,7 +142,8 @@ const DISTANCE_DISPLAY_CONDITION_INDEX =
 const DISABLE_DEPTH_DISTANCE_INDEX =
   (PointPrimitive.DISABLE_DEPTH_DISTANCE_INDEX = 9);
 const SPLIT_DIRECTION_INDEX = (PointPrimitive.SPLIT_DIRECTION_INDEX = 10);
-PointPrimitive.NUMBER_OF_PROPERTIES = 11;
+const DEPTH_FAIL_TRANSLUCENCY = (PointPrimitive.DEPTH_FAIL_TRANSLUCENCY = 11);
+PointPrimitive.NUMBER_OF_PROPERTIES = 12;
 
 function makeDirty(pointPrimitive, propertyChanged) {
   const pointPrimitiveCollection = pointPrimitive._pointPrimitiveCollection;
@@ -493,6 +497,30 @@ Object.defineProperties(PointPrimitive.prototype, {
       if (this._clusterShow !== value) {
         this._clusterShow = value;
         makeDirty(this, SHOW_INDEX);
+      }
+    },
+  },
+
+  depthFailTranslucency: {
+    get: function () {
+      return this._depthFailTranslucency;
+    },
+    set: function (value) {
+      //>>includeStart('debug', pragmas.debug);
+      if (defined(value)) {
+        Check.typeOf.number("value", value);
+        if (value < 0) {
+          value = 0;
+        }
+        if (value > 1) {
+          value = 1;
+        }
+      }
+      //>>includeEnd('debug');
+
+      if (this._depthFailTranslucency !== value) {
+        this._depthFailTranslucency = value;
+        makeDirty(this, DEPTH_FAIL_TRANSLUCENCY);
       }
     },
   },

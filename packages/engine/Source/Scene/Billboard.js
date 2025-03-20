@@ -205,6 +205,8 @@ function Billboard(options, billboardCollection) {
   this._index = -1; // Used only by BillboardCollection
   this._batchIndex = undefined; // Used only by Vector3DTilePoints and BillboardCollection
 
+  this._depthFailTranslucency = defaultValue(options.depthFailTranslucency, 0);
+
   this._imageTexture = new BillboardTexture(billboardCollection);
   this._imageWidth = undefined;
   this._imageHeight = undefined;
@@ -272,7 +274,8 @@ const DISABLE_DEPTH_DISTANCE = (Billboard.DISABLE_DEPTH_DISTANCE = 15);
 Billboard.TEXTURE_COORDINATE_BOUNDS = 16;
 const SDF_INDEX = (Billboard.SDF_INDEX = 17);
 const SPLIT_DIRECTION_INDEX = (Billboard.SPLIT_DIRECTION_INDEX = 18);
-Billboard.NUMBER_OF_PROPERTIES = 19;
+const DEPTH_FAIL_TRANSLUCENCY = (Billboard.DEPTH_FAIL_TRANSLUCENCY = 19);
+Billboard.NUMBER_OF_PROPERTIES = 20;
 
 function makeDirty(billboard, propertyChanged) {
   const billboardCollection = billboard._billboardCollection;
@@ -478,6 +481,30 @@ Object.defineProperties(Billboard.prototype, {
           translucencyByDistance,
         );
         makeDirty(this, TRANSLUCENCY_BY_DISTANCE_INDEX);
+      }
+    },
+  },
+
+  depthFailTranslucency: {
+    get: function () {
+      return this._depthFailTranslucency;
+    },
+    set: function (value) {
+      //>>includeStart('debug', pragmas.debug);
+      if (defined(value)) {
+        Check.typeOf.number("value", value);
+        if (value < 0) {
+          value = 0;
+        }
+        if (value > 1) {
+          value = 1;
+        }
+      }
+      //>>includeEnd('debug');
+
+      if (this._depthFailTranslucency !== value) {
+        this._depthFailTranslucency = value;
+        makeDirty(this, DEPTH_FAIL_TRANSLUCENCY);
       }
     },
   },
@@ -1541,7 +1568,8 @@ Billboard.prototype.equals = function (other) {
         other._distanceDisplayCondition,
       ) &&
       this._disableDepthTestDistance === other._disableDepthTestDistance &&
-      this._splitDirection === other._splitDirection)
+      this._splitDirection === other._splitDirection &&
+      this._depthFailTranslucency === other._depthFailTranslucency)
   );
 };
 

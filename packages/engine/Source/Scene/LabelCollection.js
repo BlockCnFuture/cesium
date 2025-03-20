@@ -189,6 +189,7 @@ function rebindAllGlyphs(labelCollection, label) {
     backgroundBillboard.disableDepthTestDistance =
       label._disableDepthTestDistance;
     backgroundBillboard.clusterShow = label.clusterShow;
+    backgroundBillboard.depthFailTranslucency = label.depthFailTranslucency;
   }
 
   const glyphBillboardCollection = labelCollection._glyphBillboardCollection;
@@ -327,6 +328,7 @@ function rebindAllGlyphs(labelCollection, label) {
       billboard.color = Color.TRANSPARENT;
       billboard.outlineWidth = label.outlineWidth;
     }
+    billboard.depthFailTranslucency = label.depthFailTranslucency;
   }
 
   // changing glyphs will cause the position of the

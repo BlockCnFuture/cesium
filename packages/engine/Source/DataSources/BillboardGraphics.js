@@ -30,6 +30,7 @@ import createPropertyDescriptor from "./createPropertyDescriptor.js";
  * @property {Property | DistanceDisplayCondition} [distanceDisplayCondition] A Property specifying at what distance from the camera that this billboard will be displayed.
  * @property {Property | number} [disableDepthTestDistance] A Property specifying the distance from the camera at which to disable the depth test to.
  * @property {Property | SplitDirection} [splitDirection] A Property specifying the {@link SplitDirection} of the billboard.
+ * @property {Property | number} [depthFailTranslucency] A {@link depthFailTranslucency} Property used to set translucency when depthTest failed.
  */
 
 /**
@@ -92,6 +93,7 @@ function BillboardGraphics(options) {
   this._disableDepthTestDistanceSubscription = undefined;
   this._splitDirection = undefined;
   this._splitDirectionSubscription = undefined;
+  this._depthFailTranslucency = undefined;
 
   this.merge(defaultValue(options, defaultValue.EMPTY_OBJECT));
 }
@@ -341,6 +343,8 @@ Object.defineProperties(BillboardGraphics.prototype, {
    * @default SplitDirection.NONE
    */
   splitDirection: createPropertyDescriptor("splitDirection"),
+
+  depthFailTranslucency: createPropertyDescriptor("depthFailTranslucency"),
 });
 
 /**
@@ -374,6 +378,7 @@ BillboardGraphics.prototype.clone = function (result) {
   result.distanceDisplayCondition = this._distanceDisplayCondition;
   result.disableDepthTestDistance = this._disableDepthTestDistance;
   result.splitDirection = this._splitDirection;
+  result.depthFailTranslucency = this._depthFailTranslucency;
   return result;
 };
 
@@ -440,6 +445,10 @@ BillboardGraphics.prototype.merge = function (source) {
   this.splitDirection = defaultValue(
     this.splitDirection,
     source.splitDirection,
+  );
+  this.depthFailTranslucency = defaultValue(
+    this._depthFailTranslucency,
+    source.depthFailTranslucency,
   );
 };
 export default BillboardGraphics;

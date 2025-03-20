@@ -199,6 +199,10 @@ PointVisualizer.prototype.update = function (time) {
         time,
         defaultSplitDirection,
       );
+      pointPrimitive.depthFailTranslucency = Property.getValueOrUndefined(
+        pointGraphics._depthFailTranslucency,
+        time,
+      );
     } else if (defined(billboard)) {
       billboard.show = true;
       billboard.position = position;
@@ -304,7 +308,10 @@ PointVisualizer.prototype.update = function (time) {
           ),
         );
       }
-
+      billboard.depthFailTranslucency = Property.getValueOrUndefined(
+        pointGraphics._depthFailTranslucency,
+        time,
+      );
       if (updateClamping) {
         billboard._updateClamping();
       }

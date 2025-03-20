@@ -226,6 +226,10 @@ BillboardVisualizer.prototype.update = function (time) {
       time,
       defaultSplitDirection,
     );
+    billboard.depthFailTranslucency = Property.getValueOrUndefined(
+      billboardGraphics.depthFailTranslucency,
+      time,
+    );
 
     const subRegion = Property.getValueOrUndefined(
       billboardGraphics._imageSubRegion,

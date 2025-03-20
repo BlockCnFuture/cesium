@@ -40,6 +40,7 @@ const DISABLE_DEPTH_DISTANCE_INDEX =
   PointPrimitive.DISABLE_DEPTH_DISTANCE_INDEX;
 const SPLIT_DIRECTION_INDEX = PointPrimitive.SPLIT_DIRECTION_INDEX;
 const NUMBER_OF_PROPERTIES = PointPrimitive.NUMBER_OF_PROPERTIES;
+const DEPTH_FAIL_TRANSLUCENCY = PointPrimitive.DEPTH_FAIL_TRANSLUCENCY;
 
 const attributeLocations = {
   positionHighAndSize: 0,
@@ -48,6 +49,7 @@ const attributeLocations = {
   compressedAttribute1: 3, // show, translucency by distance, some free space
   scaleByDistance: 4,
   distanceDisplayConditionAndDisableDepthAndSplitDirection: 5,
+  depthFailTranslucency: 6,
 };
 
 /**
@@ -98,6 +100,17 @@ function PointPrimitiveCollection(options) {
   this._rsOpaque = undefined;
   this._rsTranslucent = undefined;
   this._vaf = undefined;
+
+  this._spDepthFail = undefined;
+  this._spTranslucentDepthFail = undefined;
+  this._rsDepthFail = RenderState.fromCache({
+    depthTest: {
+      enabled: true,
+      func: WebGLConstants.GREATER,
+    },
+    blending: BlendingState.ALPHA_BLEND,
+  });
+  this._allDepthFailTranslucencyNoValue = true;
 
   this._pointPrimitives = [];
   this._pointPrimitivesToUpdate = [];
@@ -498,6 +511,12 @@ function createVAF(context, numberOfPointPrimitives, buffersUsage) {
         componentDatatype: ComponentDatatype.FLOAT,
         usage: buffersUsage[DISTANCE_DISPLAY_CONDITION_INDEX],
       },
+      {
+        index: attributeLocations.depthFailTranslucency,
+        componentsPerAttribute: 1,
+        componentDatatype: ComponentDatatype.FLOAT,
+        usage: BufferUsage.STATIC_DRAW,
+      },
     ],
     numberOfPointPrimitives,
   ); // 1 vertex per pointPrimitive
@@ -709,6 +728,28 @@ function writeDistanceDisplayConditionAndDepthDisableAndSplitDirection(
   writer(i, near, far, disableDepthTestDistance, direction);
 }
 
+function writeDepthFailTranslucency(
+  pointPrimitiveCollection,
+  context,
+  vafWriters,
+  pointPrimitive,
+) {
+  const i = pointPrimitive._index;
+  const writer = vafWriters[attributeLocations.depthFailTranslucency];
+  pointPrimitiveCollection._allDepthFailTranslucencyNoValue =
+    pointPrimitiveCollection._allDepthFailTranslucencyNoValue &&
+    pointPrimitive.depthFailTranslucency === undefined;
+  let s = 1;
+  if (!pointPrimitiveCollection._allDepthFailTranslucencyNoValue) {
+    if (pointPrimitive.depthFailTranslucency === undefined) {
+      s = 0;
+    } else {
+      s = pointPrimitive.depthFailTranslucency;
+    }
+  }
+  writer(i, s);
+}
+
 function writePointPrimitive(
   pointPrimitiveCollection,
   context,
@@ -740,6 +781,12 @@ function writePointPrimitive(
     pointPrimitive,
   );
   writeDistanceDisplayConditionAndDepthDisableAndSplitDirection(
+    pointPrimitiveCollection,
+    context,
+    vafWriters,
+    pointPrimitive,
+  );
+  writeDepthFailTranslucency(
     pointPrimitiveCollection,
     context,
     vafWriters,
@@ -895,6 +942,7 @@ PointPrimitiveCollection.prototype.update = function (frameState) {
       // PERFORMANCE_IDEA:  Instead of creating a new one, resize like std::vector.
       this._vaf = createVAF(context, pointPrimitivesLength, this._buffersUsage);
       vafWriters = this._vaf.writers;
+      this._allDepthFailTranslucencyNoValue = true;
 
       // Rewrite entire buffer if pointPrimitives were added or removed.
       for (let i = 0; i < pointPrimitivesLength; ++i) {
@@ -940,6 +988,10 @@ PointPrimitiveCollection.prototype.update = function (frameState) {
       writers.push(
         writeDistanceDisplayConditionAndDepthDisableAndSplitDirection,
       );
+    }
+
+    if (properties[DEPTH_FAIL_TRANSLUCENCY]) {
+      writers.push(writeDepthFailTranslucency);
     }
 
     const numWriters = writers.length;
@@ -1132,6 +1184,59 @@ PointPrimitiveCollection.prototype.update = function (frameState) {
       });
     }
 
+    if (!this._allDepthFailTranslucencyNoValue) {
+      const depthVertexShader = vs.clone();
+      depthVertexShader.defines.push("DEPTH_FAIL_TRANSLUCENCY");
+
+      const depthFragmentShader = new ShaderSource({
+        sources: [PointPrimitiveCollectionFS],
+      });
+
+      if (this._blendOption === BlendOption.OPAQUE_AND_TRANSLUCENT) {
+        const opaqueShader = depthFragmentShader.clone();
+        opaqueShader.defines.push("OPAQUE");
+        this._spDepthFail = ShaderProgram.replaceCache({
+          context: context,
+          shaderProgram: this._spDepthFail,
+          vertexShaderSource: depthVertexShader,
+          fragmentShaderSource: opaqueShader,
+          attributeLocations: attributeLocations,
+        });
+
+        const translucentShader = depthFragmentShader.clone();
+        translucentShader.defines.push("TRANSLUCENT");
+        this._spTranslucentDepthFail = ShaderProgram.replaceCache({
+          context: context,
+          shaderProgram: this._spTranslucentDepthFail,
+          vertexShaderSource: depthVertexShader,
+          fragmentShaderSource: translucentShader,
+          attributeLocations: attributeLocations,
+        });
+      }
+
+      if (this._blendOption === BlendOption.OPAQUE) {
+        const opaqueShader = depthFragmentShader.clone();
+        this._spDepthFail = ShaderProgram.replaceCache({
+          context: context,
+          shaderProgram: this._spDepthFail,
+          vertexShaderSource: depthVertexShader,
+          fragmentShaderSource: opaqueShader,
+          attributeLocations: attributeLocations,
+        });
+      }
+
+      if (this._blendOption === BlendOption.TRANSLUCENT) {
+        const translucentShader = depthFragmentShader.clone();
+        this._spTranslucentDepthFail = ShaderProgram.replaceCache({
+          context: context,
+          shaderProgram: this._spTranslucentDepthFail,
+          vertexShaderSource: depthVertexShader,
+          fragmentShaderSource: translucentShader,
+          attributeLocations: attributeLocations,
+        });
+      }
+    }
+
     this._compiledShaderScaleByDistance = this._shaderScaleByDistance;
     this._compiledShaderTranslucencyByDistance =
       this._shaderTranslucencyByDistance;
@@ -1185,6 +1290,27 @@ PointPrimitiveCollection.prototype.update = function (frameState) {
       command.pickId = "v_pickColor";
 
       commandList.push(command);
+
+      if (!this._allDepthFailTranslucencyNoValue) {
+        const depthShaderProgram = opaqueCommand
+          ? this._spDepthFail
+          : this._spTranslucentDepthFail;
+        if (depthShaderProgram) {
+          const depthCommand = new DrawCommand();
+          depthCommand.primitiveType = PrimitiveType.POINTS;
+          depthCommand.boundingVolume = boundingVolume;
+          depthCommand.pass = Pass.TRANSLUCENT;
+          depthCommand.owner = this;
+          depthCommand.modelMatrix = modelMatrix;
+          depthCommand.shaderProgram = depthShaderProgram;
+          depthCommand.uniformMap = this._uniforms;
+          depthCommand.vertexArray = va[index].va;
+          depthCommand.renderState = this._rsDepthFail;
+          depthCommand.pickId = "v_pickColor";
+
+          commandList.push(depthCommand);
+        }
+      }
     }
   }
 };

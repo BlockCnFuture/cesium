@@ -19,6 +19,10 @@ in vec4 textureCoordinateBoundsOrLabelTranslate;    // the min and max x and y v
 in float a_batchId;
 #endif
 
+#ifdef DEPTH_FAIL_TRANSLUCENCY
+in float depthFailTranslucency;
+#endif
+
 out vec2 v_textureCoordinates;
 #ifdef FRAGMENT_DEPTH_CHECK
 out vec4 v_textureCoordinateBounds;
@@ -426,6 +430,11 @@ if (lengthSq < disableDepthTestDistance) {
     v_outlineWidth = outlineWidth / 255.0;
     v_outlineColor = outlineColor;
     v_outlineColor.a *= translucency;
+
+    #ifdef DEPTH_FAIL_TRANSLUCENCY
+    v_outlineColor.a *= depthFailTranslucency;
+    #endif
+
 #endif
 
     v_pickColor = pickColor;
@@ -433,4 +442,8 @@ if (lengthSq < disableDepthTestDistance) {
     v_color = color;
     v_color.a *= translucency;
     v_splitDirection = splitDirection;
+
+    #ifdef DEPTH_FAIL_TRANSLUCENCY
+    v_color.a *= depthFailTranslucency;
+    #endif
 }

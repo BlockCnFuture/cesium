@@ -247,6 +247,10 @@ LabelVisualizer.prototype.update = function (time) {
       labelGraphics._disableDepthTestDistance,
       time,
     );
+    label.depthFailTranslucency = Property.getValueOrUndefined(
+      labelGraphics.depthFailTranslucency,
+      time,
+    );
 
     if (updateClamping) {
       label._updateClamping();

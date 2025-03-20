@@ -13,6 +13,7 @@ import HorizontalOrigin from "./HorizontalOrigin.js";
 import LabelStyle from "./LabelStyle.js";
 import SDFSettings from "./SDFSettings.js";
 import VerticalOrigin from "./VerticalOrigin.js";
+import Check from "../Core/Check.js";
 
 const fontInfoCache = {};
 let fontInfoCacheLength = 0;
@@ -244,6 +245,7 @@ function Label(options, labelCollection) {
   );
   this._distanceDisplayCondition = distanceDisplayCondition;
   this._disableDepthTestDistance = options.disableDepthTestDistance;
+  this._depthFailTranslucency = undefined;
 
   this._labelCollection = labelCollection;
   this._glyphs = [];
@@ -1100,6 +1102,40 @@ Object.defineProperties(Label.prototype, {
     },
   },
 
+  depthFailTranslucency: {
+    get: function () {
+      return this._depthFailTranslucency;
+    },
+    set: function (value) {
+      //>>includeStart('debug', pragmas.debug);
+      if (defined(value)) {
+        Check.typeOf.number("value", value);
+        if (value < 0) {
+          value = 0;
+        }
+        if (value > 1) {
+          value = 1;
+        }
+      }
+      //>>includeEnd('debug');
+
+      if (this._depthFailTranslucency !== value) {
+        this._depthFailTranslucency = value;
+        const _glyphs = this._glyphs;
+        for (let i = 0; i < _glyphs.length; i++) {
+          const glyph = _glyphs[i];
+          if (defined(glyph.billboard)) {
+            glyph.billboard.depthFailTranslucency = value;
+          }
+        }
+        const backgroundBillboard = this._backgroundBillboard;
+        if (defined(backgroundBillboard)) {
+          backgroundBillboard.depthFailTranslucency = value;
+        }
+      }
+    },
+  },
+
   /**
    * Gets or sets the user-defined value returned when the label is picked.
    * @memberof Label.prototype
@@ -1402,6 +1438,7 @@ Label.prototype.equals = function (other) {
         other._distanceDisplayCondition,
       ) &&
       this._disableDepthTestDistance === other._disableDepthTestDistance &&
+      this._depthFailTranslucency === other._depthFailTranslucency &&
       this._id === other._id)
   );
 };

@@ -7,6 +7,10 @@ in vec4 compressedAttribute1;                                        // show, tr
 in vec4 scaleByDistance;                                             // near, nearScale, far, farScale
 in vec4 distanceDisplayConditionAndDisableDepthAndSplitDirection;    // near, far, disableDepthTestDistance, splitDirection
 
+#ifdef DEPTH_FAIL_TRANSLUCENCY
+in float depthFailTranslucency;
+#endif
+
 out vec4 v_color;
 out vec4 v_outlineColor;
 out float v_innerPercent;
@@ -174,6 +178,10 @@ void main()
     v_color.a *= translucency * show;
     v_outlineColor = outlineColor;
     v_outlineColor.a *= translucency * show;
+
+    #ifdef DEPTH_FAIL_TRANSLUCENCY
+    v_color.a *= depthFailTranslucency;
+    #endif
 
     v_innerPercent = 1.0 - outlinePercent;
     v_pixelDistance = 2.0 / totalSize;

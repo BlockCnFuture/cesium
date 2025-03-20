@@ -30,6 +30,7 @@ import createPropertyDescriptor from "./createPropertyDescriptor.js";
  * @property {Property | NearFarScalar} [scaleByDistance] A {@link NearFarScalar} Property used to set scale based on distance from the camera.
  * @property {Property | DistanceDisplayCondition} [distanceDisplayCondition] A Property specifying at what distance from the camera that this label will be displayed.
  * @property {Property | number} [disableDepthTestDistance] A Property specifying the distance from the camera at which to disable the depth test to.
+ * @property {Property | number} [depthFailTranslucency] A {@link depthFailTranslucency} Property used to set translucency when depthTest failed.
  */
 
 /**

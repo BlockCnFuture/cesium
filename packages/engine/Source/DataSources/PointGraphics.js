@@ -20,6 +20,7 @@ import createPropertyDescriptor from "./createPropertyDescriptor.js";
  * @property {Property | DistanceDisplayCondition} [distanceDisplayCondition] A Property specifying at what distance from the camera that this point will be displayed.
  * @property {Property | number} [disableDepthTestDistance] A Property specifying the distance from the camera at which to disable the depth test to.
  * @property {Property | SplitDirection} [splitDirection] A Property specifying the {@link SplitDirection} split to apply to this point.
+ * @property {Property | number} [depthFailTranslucency] A {@link depthFailTranslucency} Property used to set translucency when depthTest failed.
  */
 
 /**
@@ -54,6 +55,7 @@ function PointGraphics(options) {
   this._disableDepthTestDistanceSubscription = undefined;
   this._splitDirection = undefined;
   this._splitDirectionSubscription = undefined;
+  this._depthFailTranslucency = undefined;
 
   this.merge(defaultValue(options, defaultValue.EMPTY_OBJECT));
 }
@@ -233,6 +235,10 @@ PointGraphics.prototype.merge = function (source) {
   this.splitDirection = defaultValue(
     this.splitDirection,
     source.splitDirection,
+  );
+  this.depthFailTranslucency = defaultValue(
+    this._depthFailTranslucency,
+    source.depthFailTranslucency,
   );
 };
 export default PointGraphics;

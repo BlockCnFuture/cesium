@@ -56,6 +56,7 @@ const TEXTURE_COORDINATE_BOUNDS = Billboard.TEXTURE_COORDINATE_BOUNDS;
 const SDF_INDEX = Billboard.SDF_INDEX;
 const SPLIT_DIRECTION_INDEX = Billboard.SPLIT_DIRECTION_INDEX;
 const NUMBER_OF_PROPERTIES = Billboard.NUMBER_OF_PROPERTIES;
+const DEPTH_FAIL_TRANSLUCENCY = Billboard.DEPTH_FAIL_TRANSLUCENCY;
 
 let attributeLocations;
 
@@ -70,9 +71,10 @@ const attributeLocationsBatched = {
   pixelOffsetScaleByDistance: 7,
   compressedAttribute3: 8,
   textureCoordinateBoundsOrLabelTranslate: 9,
-  a_batchId: 10,
-  sdf: 11,
-  splitDirection: 12,
+  depthFailTranslucency: 10,
+  a_batchId: 11,
+  sdf: 12,
+  splitDirection: 13,
 };
 
 const attributeLocationsInstanced = {
@@ -87,9 +89,10 @@ const attributeLocationsInstanced = {
   pixelOffsetScaleByDistance: 8,
   compressedAttribute3: 9,
   textureCoordinateBoundsOrLabelTranslate: 10,
-  a_batchId: 11,
-  sdf: 12,
-  splitDirection: 13,
+  depthFailTranslucency: 11,
+  a_batchId: 12,
+  sdf: 13,
+  splitDirection: 14,
 };
 
 /**
@@ -162,6 +165,16 @@ function BillboardCollection(options) {
   this._rsOpaque = undefined;
   this._rsTranslucent = undefined;
   this._vaf = undefined;
+
+  this._spDepthFail = undefined;
+  this._spTranslucentDepthFail = undefined;
+  this._rsDepthFail = RenderState.fromCache({
+    depthTest: {
+      enabled: true,
+      func: WebGLConstants.GREATER,
+    },
+    blending: BlendingState.ALPHA_BLEND,
+  });
 
   this._billboards = [];
   this._billboardsToUpdate = [];
@@ -834,6 +847,12 @@ function createVAF(
       componentsPerAttribute: 1,
       componentDatatype: ComponentDatatype.FLOAT,
       usage: buffersUsage[SPLIT_DIRECTION_INDEX],
+    },
+    {
+      index: attributeLocations.depthFailTranslucency,
+      componentsPerAttribute: 1,
+      componentDatatype: ComponentDatatype.FLOAT,
+      usage: BufferUsage.STATIC_DRAW,
     },
   ];
 
@@ -1511,6 +1530,35 @@ function writeBatchId(billboardCollection, frameState, vafWriters, billboard) {
   }
 }
 
+function writeDepthFailTranslucency(
+  billboardCollection,
+  frameState,
+  vafWriters,
+  billboard,
+) {
+  let id = 1;
+  const writer = vafWriters[attributeLocations.depthFailTranslucency];
+  if (!billboardCollection._allDepthFailTranslucencyNoValue) {
+    if (billboard.depthFailTranslucency === undefined) {
+      id = 0;
+    } else {
+      id = billboard.depthFailTranslucency;
+    }
+  }
+
+  let i;
+  if (billboardCollection._instanced) {
+    i = billboard._index;
+    writer(i, id);
+  } else {
+    i = billboard._index * 4;
+    writer(i + 0, id);
+    writer(i + 1, id);
+    writer(i + 2, id);
+    writer(i + 3, id);
+  }
+}
+
 function writeSDF(billboardCollection, frameState, vafWriters, billboard) {
   if (!billboardCollection._sdf) {
     return;
@@ -1625,6 +1673,12 @@ function writeBillboard(
   writeBatchId(billboardCollection, frameState, vafWriters, billboard);
   writeSDF(billboardCollection, frameState, vafWriters, billboard);
   writeSplitDirection(billboardCollection, frameState, vafWriters, billboard);
+  writeDepthFailTranslucency(
+    billboardCollection,
+    frameState,
+    vafWriters,
+    billboard,
+  );
 }
 
 function recomputeActualPositions(
@@ -1792,6 +1846,7 @@ BillboardCollection.prototype.update = function (frameState) {
   let billboards = this._billboards;
   let billboardsLength = billboards.length;
   let allBillboardsReady = true;
+  let allDepthFailTranslucencyNoValue = true;
   for (let i = 0; i < billboardsLength; ++i) {
     const billboard = billboards[i];
     if (defined(billboard.loadError)) {
@@ -1808,7 +1863,13 @@ BillboardCollection.prototype.update = function (frameState) {
     if (billboard.show) {
       allBillboardsReady = allBillboardsReady && billboard.ready;
     }
+
+    if (billboard.depthFailTranslucency !== undefined) {
+      allDepthFailTranslucencyNoValue = false;
+    }
   }
+
+  this._allDepthFailTranslucencyNoValue = allDepthFailTranslucencyNoValue;
 
   // Queue any texture resource updates for after the frame is rendered
   const textureAtlas = this._textureAtlas;
@@ -1870,7 +1931,7 @@ BillboardCollection.prototype.update = function (frameState) {
       for (let i = 0; i < billboardsLength; ++i) {
         const billboard = this._billboards[i];
         billboard._dirty = false; // In case it needed an update.
-        billboard.textureDirty = false;
+        //billboard.textureDirty = false;
         writeBillboard(this, frameState, vafWriters, billboard);
       }
 
@@ -1945,6 +2006,10 @@ BillboardCollection.prototype.update = function (frameState) {
 
     if (properties[SDF_INDEX]) {
       writers.push(writeSDF);
+    }
+
+    if (properties[DEPTH_FAIL_TRANSLUCENCY]) {
+      writers.push(writeDepthFailTranslucency);
     }
 
     if (properties[SPLIT_DIRECTION_INDEX]) {
@@ -2069,6 +2134,163 @@ BillboardCollection.prototype.update = function (frameState) {
       });
     } else {
       this._rsTranslucent = undefined;
+    }
+  }
+
+  function createShaderProgram(entity, context, attributeLocations) {
+    let opaqueFragmentShader, translucentFragmentShader;
+    const shaderDefines = ["DEPTH_FAIL_TRANSLUCENCY"];
+    let vertexSource = BillboardCollectionVS;
+    let fragmentSource = BillboardCollectionFS;
+
+    const supportsVertexTexture =
+      ContextLimits.maximumVertexTextureImageUnits > 0;
+    const isVectorTile = defined(entity._batchTable);
+
+    if (isVectorTile) {
+      shaderDefines.push("VECTOR_TILE");
+      vertexSource = entity._batchTable.getVertexShaderCallback(
+        false,
+        "a_batchId",
+      )(vertexSource);
+      fragmentSource =
+        entity._batchTable.getFragmentShaderCallback(false)(fragmentSource);
+    }
+
+    const vertexShader = new ShaderSource({
+      defines: shaderDefines,
+      sources: [vertexSource],
+    });
+
+    if (entity._instanced) {
+      vertexShader.defines.push("INSTANCED");
+    }
+    if (entity._shaderRotation) {
+      vertexShader.defines.push("ROTATION");
+    }
+    if (entity._shaderAlignedAxis) {
+      vertexShader.defines.push("ALIGNED_AXIS");
+    }
+    if (entity._shaderScaleByDistance) {
+      vertexShader.defines.push("EYE_DISTANCE_SCALING");
+    }
+    if (entity._shaderTranslucencyByDistance) {
+      vertexShader.defines.push("EYE_DISTANCE_TRANSLUCENCY");
+    }
+    if (entity._shaderPixelOffsetScaleByDistance) {
+      vertexShader.defines.push("EYE_DISTANCE_PIXEL_OFFSET");
+    }
+    if (entity._shaderDistanceDisplayCondition) {
+      vertexShader.defines.push("DISTANCE_DISPLAY_CONDITION");
+    }
+    if (entity._shaderDisableDepthDistance) {
+      vertexShader.defines.push("DISABLE_DEPTH_DISTANCE");
+    }
+    if (entity._shaderClampToGround) {
+      vertexShader.defines.push(
+        supportsVertexTexture ? "VERTEX_DEPTH_CHECK" : "FRAGMENT_DEPTH_CHECK",
+      );
+    }
+
+    const sdfEdge = 1 - SDFSettings.CUTOFF;
+    if (entity._sdf) {
+      vertexShader.defines.push("SDF");
+    }
+
+    if (entity._blendOption === BlendOption.OPAQUE_AND_TRANSLUCENT) {
+      opaqueFragmentShader = new ShaderSource({
+        defines: ["OPAQUE"],
+        sources: [fragmentSource],
+      });
+
+      if (entity._shaderClampToGround) {
+        opaqueFragmentShader.defines.push(
+          supportsVertexTexture ? "VERTEX_DEPTH_CHECK" : "FRAGMENT_DEPTH_CHECK",
+        );
+      }
+      if (entity._sdf) {
+        opaqueFragmentShader.defines.push("SDF");
+        opaqueFragmentShader.defines.push(`SDF_EDGE ${sdfEdge}`);
+      }
+
+      entity._spDepthFail = ShaderProgram.replaceCache({
+        context,
+        shaderProgram: entity._spDepthFail,
+        vertexShaderSource: vertexShader,
+        fragmentShaderSource: opaqueFragmentShader,
+        attributeLocations,
+      });
+
+      translucentFragmentShader = new ShaderSource({
+        defines: ["TRANSLUCENT"],
+        sources: [fragmentSource],
+      });
+
+      if (entity._shaderClampToGround) {
+        translucentFragmentShader.defines.push(
+          supportsVertexTexture ? "VERTEX_DEPTH_CHECK" : "FRAGMENT_DEPTH_CHECK",
+        );
+      }
+      if (entity._sdf) {
+        translucentFragmentShader.defines.push("SDF");
+        translucentFragmentShader.defines.push(`SDF_EDGE ${sdfEdge}`);
+      }
+
+      entity._spTranslucentDepthFail = ShaderProgram.replaceCache({
+        context,
+        shaderProgram: entity._spTranslucentDepthFail,
+        vertexShaderSource: vertexShader,
+        fragmentShaderSource: translucentFragmentShader,
+        attributeLocations,
+      });
+    }
+
+    if (entity._blendOption === BlendOption.OPAQUE) {
+      opaqueFragmentShader = new ShaderSource({
+        sources: [fragmentSource],
+      });
+
+      if (entity._shaderClampToGround) {
+        opaqueFragmentShader.defines.push(
+          supportsVertexTexture ? "VERTEX_DEPTH_CHECK" : "FRAGMENT_DEPTH_CHECK",
+        );
+      }
+      if (entity._sdf) {
+        opaqueFragmentShader.defines.push("SDF");
+        opaqueFragmentShader.defines.push(`SDF_EDGE ${sdfEdge}`);
+      }
+
+      entity._spDepthFail = ShaderProgram.replaceCache({
+        context,
+        shaderProgram: entity._spDepthFail,
+        vertexShaderSource: vertexShader,
+        fragmentShaderSource: opaqueFragmentShader,
+        attributeLocations,
+      });
+    }
+
+    if (entity._blendOption === BlendOption.TRANSLUCENT) {
+      translucentFragmentShader = new ShaderSource({
+        sources: [fragmentSource],
+      });
+
+      if (entity._shaderClampToGround) {
+        translucentFragmentShader.defines.push(
+          supportsVertexTexture ? "VERTEX_DEPTH_CHECK" : "FRAGMENT_DEPTH_CHECK",
+        );
+      }
+      if (entity._sdf) {
+        translucentFragmentShader.defines.push("SDF");
+        translucentFragmentShader.defines.push(`SDF_EDGE ${sdfEdge}`);
+      }
+
+      entity._spTranslucentDepthFail = ShaderProgram.replaceCache({
+        context,
+        shaderProgram: entity._spTranslucentDepthFail,
+        vertexShaderSource: vertexShader,
+        fragmentShaderSource: translucentFragmentShader,
+        attributeLocations,
+      });
     }
   }
 
@@ -2262,6 +2484,9 @@ BillboardCollection.prototype.update = function (frameState) {
       });
     }
 
+    if (!this._allDepthFailTranslucencyNoValue) {
+      createShaderProgram(this, context, attributeLocations);
+    }
     this._compiledShaderRotation = this._shaderRotation;
     this._compiledShaderAlignedAxis = this._shaderAlignedAxis;
     this._compiledShaderScaleByDistance = this._shaderScaleByDistance;
@@ -2296,7 +2521,11 @@ BillboardCollection.prototype.update = function (frameState) {
     } else {
       pickId = "v_pickColor";
     }
-
+    if (!this._spDepthFail || !this._spTranslucentDepthFail) {
+      if (!this._allDepthFailTranslucencyNoValue) {
+        createShaderProgram(this, context, attributeLocations);
+      }
+    }
     colorList.length = vaLength;
     const totalLength = opaqueAndTranslucent ? vaLength * 2 : vaLength;
     for (let j = 0; j < totalLength; ++j) {
@@ -2330,6 +2559,32 @@ BillboardCollection.prototype.update = function (frameState) {
       }
 
       commandList.push(command);
+
+      if (!this._allDepthFailTranslucencyNoValue) {
+        const depthFailShader = opaqueCommand
+          ? this._spDepthFail
+          : this._spTranslucentDepthFail;
+        if (depthFailShader) {
+          const depthFailCommand = new DrawCommand();
+          depthFailCommand.pass = Pass.TRANSLUCENT;
+          depthFailCommand.boundingVolume = boundingVolume;
+          depthFailCommand.owner = this;
+          depthFailCommand.modelMatrix = modelMatrix;
+          depthFailCommand.count = va[index].indicesCount;
+          depthFailCommand.shaderProgram = depthFailShader;
+          depthFailCommand.uniformMap = uniforms;
+          depthFailCommand.vertexArray = va[index].va;
+          depthFailCommand.renderState = this._rsDepthFail;
+          depthFailCommand.pickId = pickId;
+
+          if (this._instanced) {
+            depthFailCommand.count = 6;
+            depthFailCommand.instanceCount = billboardsLength;
+          }
+
+          commandList.push(depthFailCommand);
+        }
+      }
     }
 
     if (this.debugShowTextureAtlas) {
