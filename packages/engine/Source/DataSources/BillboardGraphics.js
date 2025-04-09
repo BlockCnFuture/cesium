@@ -1,4 +1,4 @@
-import defaultValue from "../Core/defaultValue.js";
+import Frozen from "../Core/Frozen.js";
 import defined from "../Core/defined.js";
 import DeveloperError from "../Core/DeveloperError.js";
 import Event from "../Core/Event.js";
@@ -95,7 +95,7 @@ function BillboardGraphics(options) {
   this._splitDirectionSubscription = undefined;
   this._depthFailTranslucency = undefined;
 
-  this.merge(defaultValue(options, defaultValue.EMPTY_OBJECT));
+  this.merge(options ?? Frozen.EMPTY_OBJECT);
 }
 
 Object.defineProperties(BillboardGraphics.prototype, {
@@ -395,60 +395,32 @@ BillboardGraphics.prototype.merge = function (source) {
   }
   //>>includeEnd('debug');
 
-  this.show = defaultValue(this._show, source.show);
-  this.image = defaultValue(this._image, source.image);
-  this.scale = defaultValue(this._scale, source.scale);
-  this.pixelOffset = defaultValue(this._pixelOffset, source.pixelOffset);
-  this.eyeOffset = defaultValue(this._eyeOffset, source.eyeOffset);
-  this.horizontalOrigin = defaultValue(
-    this._horizontalOrigin,
-    source.horizontalOrigin,
-  );
-  this.verticalOrigin = defaultValue(
-    this._verticalOrigin,
-    source.verticalOrigin,
-  );
-  this.heightReference = defaultValue(
-    this._heightReference,
-    source.heightReference,
-  );
-  this.color = defaultValue(this._color, source.color);
-  this.rotation = defaultValue(this._rotation, source.rotation);
-  this.alignedAxis = defaultValue(this._alignedAxis, source.alignedAxis);
-  this.sizeInMeters = defaultValue(this._sizeInMeters, source.sizeInMeters);
-  this.width = defaultValue(this._width, source.width);
-  this.height = defaultValue(this._height, source.height);
-  this.scaleByDistance = defaultValue(
-    this._scaleByDistance,
-    source.scaleByDistance,
-  );
-  this.translucencyByDistance = defaultValue(
-    this._translucencyByDistance,
-    source.translucencyByDistance,
-  );
-  this.pixelOffsetScaleByDistance = defaultValue(
-    this._pixelOffsetScaleByDistance,
-    source.pixelOffsetScaleByDistance,
-  );
-  this.imageSubRegion = defaultValue(
-    this._imageSubRegion,
-    source.imageSubRegion,
-  );
-  this.distanceDisplayCondition = defaultValue(
-    this._distanceDisplayCondition,
-    source.distanceDisplayCondition,
-  );
-  this.disableDepthTestDistance = defaultValue(
-    this._disableDepthTestDistance,
-    source.disableDepthTestDistance,
-  );
-  this.splitDirection = defaultValue(
-    this.splitDirection,
-    source.splitDirection,
-  );
-  this.depthFailTranslucency = defaultValue(
-    this._depthFailTranslucency,
-    source.depthFailTranslucency,
-  );
+  this.show = this._show ?? source.show;
+  this.image = this._image ?? source.image;
+  this.scale = this._scale ?? source.scale;
+  this.pixelOffset = this._pixelOffset ?? source.pixelOffset;
+  this.eyeOffset = this._eyeOffset ?? source.eyeOffset;
+  this.horizontalOrigin = this._horizontalOrigin ?? source.horizontalOrigin;
+  this.verticalOrigin = this._verticalOrigin ?? source.verticalOrigin;
+  this.heightReference = this._heightReference ?? source.heightReference;
+  this.color = this._color ?? source.color;
+  this.rotation = this._rotation ?? source.rotation;
+  this.alignedAxis = this._alignedAxis ?? source.alignedAxis;
+  this.sizeInMeters = this._sizeInMeters ?? source.sizeInMeters;
+  this.width = this._width ?? source.width;
+  this.height = this._height ?? source.height;
+  this.scaleByDistance = this._scaleByDistance ?? source.scaleByDistance;
+  this.translucencyByDistance =
+    this._translucencyByDistance ?? source.translucencyByDistance;
+  this.pixelOffsetScaleByDistance =
+    this._pixelOffsetScaleByDistance ?? source.pixelOffsetScaleByDistance;
+  this.imageSubRegion = this._imageSubRegion ?? source.imageSubRegion;
+  this.distanceDisplayCondition =
+    this._distanceDisplayCondition ?? source.distanceDisplayCondition;
+  this.disableDepthTestDistance =
+    this._disableDepthTestDistance ?? source.disableDepthTestDistance;
+  this.splitDirection = this.splitDirection ?? source.splitDirection;
+  this.depthFailTranslucency =
+    this._depthFailTranslucency ?? source.depthFailTranslucency;
 };
 export default BillboardGraphics;
