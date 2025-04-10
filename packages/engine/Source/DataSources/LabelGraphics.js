@@ -324,6 +324,15 @@ Object.defineProperties(LabelGraphics.prototype, {
   disableDepthTestDistance: createPropertyDescriptor(
     "disableDepthTestDistance",
   ),
+
+  /**
+   * Gets or sets a {@link depthFailTranslucency} specifying the translucency to apply when depth testing fails.
+   * This allows the object to appear semi-transparent when it is behind other geometry, improving visual clarity.
+   * The value should be a number between 0.0 (fully transparent) and 1.0 (fully opaque).
+   * @memberof LabelGraphics.prototype
+   * @type {Property|undefined}
+   */
+  depthFailTranslucency: createPropertyDescriptor("depthFailTranslucency"),
 });
 
 /**

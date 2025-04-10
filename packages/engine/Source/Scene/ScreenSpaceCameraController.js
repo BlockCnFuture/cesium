@@ -24,6 +24,7 @@ import MapMode2D from "./MapMode2D.js";
 import SceneMode from "./SceneMode.js";
 import SceneTransforms from "./SceneTransforms.js";
 import TweenCollection from "./TweenCollection.js";
+import Camera from "./Camera.js";
 
 /**
  * Modifies the camera position and orientation based on mouse input to a canvas.
@@ -86,6 +87,14 @@ function ScreenSpaceCameraController(scene) {
    * @default true
    */
   this.enableLook = true;
+  /**
+   * If true, allows the user to pan the camera based on a screen-parallel plane.
+   * The camera will translate parallel to the screen plane intersecting the globe at the initial click position.
+   * This is only supported in 3D mode.
+   * @type {boolean}
+   * @default true
+   */
+  this.enablePanOnScreenPlane = true;
   /**
    * A parameter in the range <code>[0, 1)</code> used to determine how long
    * the camera will continue to spin because of inertia.
@@ -217,9 +226,25 @@ function ScreenSpaceCameraController(scene) {
    * or an array of any of the preceding.
    * </p>
    * @type {CameraEventType|Array|undefined}
-   * @default { eventType : {@link CameraEventType.LEFT_DRAG}, modifier : {@link KeyboardEventModifier.SHIFT} }
+   * @default { eventType : {@link CameraEventType.LEFT_DRAG}, modifier : {@link KeyboardEventModifier.ALT} }
    */
   this.lookEventTypes = {
+    eventType: CameraEventType.LEFT_DRAG,
+    modifier: KeyboardEventModifier.ALT,
+  };
+  /**
+   * The input that allows the user to pan the camera relative to the screen plane.
+   * This means the camera moves parallel to the screen, effectively sliding the view without changing its orientation.
+   * This only applies in 3D view modes.
+   * <p>
+   * The type can be a {@link CameraEventType}, <code>undefined</code>, an object with <code>eventType</code>
+   * and <code>modifier</code> properties with types <code>CameraEventType</code> and {@link KeyboardEventModifier},
+   * or an array of any of the preceding.
+   * </p>
+   * @type {CameraEventType|Array|undefined}
+   * @default { eventType : {@link CameraEventType.LEFT_DRAG}, modifier : {@link KeyboardEventModifier.SHIFT} }
+   */
+  this.panEventTypes = {
     eventType: CameraEventType.LEFT_DRAG,
     modifier: KeyboardEventModifier.SHIFT,
   };
@@ -325,6 +350,7 @@ function ScreenSpaceCameraController(scene) {
   this._useZoomWorldPosition = false;
   this._panLastMousePosition = new Cartesian2();
   this._panLastWorldPosition = new Cartesian3();
+  this._panOnScreenPlaneStartMousePosition = new Cartesian2(-1.0, -1.0);
   this._tiltCVOffMap = false;
   this._looking = false;
   this._rotating = false;
@@ -334,6 +360,8 @@ function ScreenSpaceCameraController(scene) {
   this._rotatingZoom = false;
   this._adjustedHeightForTerrain = false;
   this._cameraUnderground = false;
+  this._panOnScreenPlanePickedPosition = null;
+  this._panOnScreenPlaneStartCamera = new Camera(scene);
 
   const projection = scene.mapProjection;
   this._maxCoord = projection.project(
@@ -2856,6 +2884,76 @@ function look3D(controller, startPosition, movement, rotationAxis) {
   }
 }
 
+function panOnScreenPlane(controller, startPosition, movement, rotationAxis) {
+  const scene = controller._scene;
+  const camera = scene.camera;
+
+  if (
+    !Cartesian2.equals(
+      startPosition,
+      controller._panOnScreenPlaneStartMousePosition,
+    )
+  ) {
+    const pickedPosition = pickPosition(
+      controller,
+      startPosition,
+      new Cartesian2(),
+    );
+    if (!pickedPosition) {
+      controller._panOnScreenPlanePickedPosition = null;
+      return;
+    }
+
+    const { direction, position, up, right } = camera;
+    controller._panOnScreenPlanePickedPosition =
+      Cartesian3.clone(pickedPosition);
+    Object.assign(controller._panOnScreenPlaneStartCamera, {
+      direction,
+      position,
+      up,
+      right,
+    });
+    controller._panOnScreenPlaneStartMousePosition = startPosition.clone();
+  }
+
+  if (
+    !controller._panOnScreenPlanePickedPosition ||
+    !controller._panOnScreenPlaneStartCamera
+  ) {
+    return;
+  }
+
+  const ray = controller._panOnScreenPlaneStartCamera.getPickRay(
+    movement.endPosition,
+  );
+  const normal = Cartesian3.normalize(
+    controller._panOnScreenPlaneStartCamera.direction,
+    new Cartesian3(),
+  );
+  const distance = -Cartesian3.dot(
+    normal,
+    controller._panOnScreenPlanePickedPosition,
+  );
+  const plane = new Plane(normal, distance);
+  const point = IntersectionTests.rayPlane(ray, plane);
+
+  if (!point) {
+    return;
+  }
+
+  const translation = Cartesian3.subtract(
+    controller._panOnScreenPlanePickedPosition,
+    point,
+    new Cartesian3(),
+  );
+  const newPosition = Cartesian3.add(
+    controller._panOnScreenPlaneStartCamera.position,
+    translation,
+    new Cartesian3(),
+  );
+  camera.position = newPosition;
+}
+
 function update3D(controller) {
   reactToInput(
     controller,
@@ -2886,6 +2984,12 @@ function update3D(controller) {
     controller.enableLook,
     controller.lookEventTypes,
     look3D,
+  );
+  reactToInput(
+    controller,
+    controller.enablePanOnScreenPlane,
+    controller.panEventTypes,
+    panOnScreenPlane,
   );
 }
 
