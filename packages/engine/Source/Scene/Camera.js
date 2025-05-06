@@ -1214,12 +1214,14 @@ function calculateOrthographicFrustumWidth(camera) {
   let rayIntersection;
   if (defined(globe)) {
     const ray = camera.getPickRay(mousePosition, scratchPickRay);
-    rayIntersection = globe.pickWorldCoordinates(
-      ray,
-      scene,
-      true,
-      scratchRayIntersection,
-    );
+    if (ray) {
+      rayIntersection = globe.pickWorldCoordinates(
+        ray,
+        scene,
+        true,
+        scratchRayIntersection,
+      );
+    }
   }
 
   let depthIntersection;
