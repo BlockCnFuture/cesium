@@ -448,7 +448,10 @@ function handleWheel(screenSpaceEventHandler, event) {
   );
 
   if (defined(action)) {
-    action(delta);
+    action(
+      delta,
+      getPosition(screenSpaceEventHandler, event, new Cartesian2()),
+    );
 
     event.preventDefault();
   }
