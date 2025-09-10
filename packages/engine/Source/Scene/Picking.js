@@ -14,6 +14,7 @@ import PerspectiveFrustum from "../Core/PerspectiveFrustum.js";
 import PerspectiveOffCenterFrustum from "../Core/PerspectiveOffCenterFrustum.js";
 import Ray from "../Core/Ray.js";
 import ShowGeometryInstanceAttribute from "../Core/ShowGeometryInstanceAttribute.js";
+import Pass from "../Renderer/Pass.js";
 import Camera from "./Camera.js";
 import Cesium3DTileFeature from "./Cesium3DTileFeature.js";
 import Cesium3DTilePass from "./Cesium3DTilePass.js";
@@ -24,6 +25,8 @@ import PrimitiveCollection from "./PrimitiveCollection.js";
 import SceneMode from "./SceneMode.js";
 import SceneTransforms from "./SceneTransforms.js";
 import View from "./View.js";
+import DerivedCommand from "./DerivedCommand.js";
+import ShadowMap from "./ShadowMap.js";
 
 const offscreenDefaultWidth = 0.1;
 
@@ -261,6 +264,167 @@ function computePickingDrawingBufferRectangle(
   return result;
 }
 
+const scratchPerspectiveFrustum = new PerspectiveFrustum();
+const scratchPerspectiveOffCenterFrustum = new PerspectiveOffCenterFrustum();
+const scratchOrthographicFrustum = new OrthographicFrustum();
+const scratchOrthographicOffCenterFrustum = new OrthographicOffCenterFrustum();
+
+// 执行绘制命令，支持 pick / depth / shadow 等派生命令
+function executePickCommand(command, scene, context, passState, framebuffer) {
+  const frameState = scene._frameState;
+
+  if (defined(scene.debugCommandFilter) && !scene.debugCommandFilter(command)) {
+    return;
+  }
+
+  if (frameState.useLogDepth && defined(command.derivedCommands.logDepth)) {
+    command = command.derivedCommands.logDepth.command;
+  }
+
+  const passes = frameState.passes;
+
+  if (
+    !passes.pick &&
+    !passes.depth &&
+    scene._hdr &&
+    defined(command.derivedCommands) &&
+    defined(command.derivedCommands.hdr)
+  ) {
+    command = command.derivedCommands.hdr.command;
+  }
+
+  if (passes.pick || passes.depth) {
+    if (
+      passes.pick &&
+      !passes.depth &&
+      defined(command.derivedCommands.picking)
+    ) {
+      command = command.derivedCommands.picking.pickCommand;
+      command.execute(context, passState);
+      return;
+    } else if (defined(command.derivedCommands.depth)) {
+      command = command.derivedCommands.depth.depthOnlyCommand;
+      command.execute(context, passState);
+      return;
+    }
+  }
+
+  if (scene.debugShowCommands || scene.debugShowFrustums) {
+    scene._debugInspector.executeDebugShowFrustumsCommand(
+      scene,
+      command,
+      passState,
+    );
+    return;
+  }
+
+  if (
+    frameState.shadowState.lightShadowsEnabled &&
+    command.receiveShadows &&
+    defined(command.derivedCommands.shadows)
+  ) {
+    command.derivedCommands.shadows.receiveCommand.execute(context, passState);
+  } else {
+    command.execute(context, passState);
+  }
+}
+
+// 构建命令的派生版本（pick, depth, hdr, shadows, oit）
+function createPickDerivedCommands(scene, command, shadowsDirty) {
+  const frameState = scene._frameState;
+  const context = scene._context;
+  const oit = scene._view.oit;
+  const shadowMaps = frameState.shadowState.lightShadowMaps;
+  const shadowsEnabled = frameState.shadowState.lightShadowsEnabled;
+  let derived = command.derivedCommands;
+
+  if (defined(command.pickId)) {
+    derived.picking = DerivedCommand.createPickDerivedCommand(
+      scene,
+      command,
+      context,
+      derived.picking,
+    );
+  }
+
+  if (!command.pickOnly) {
+    derived.depth = DerivedCommand.createDepthOnlyDerivedCommand(
+      scene,
+      command,
+      context,
+      derived.depth,
+    );
+  }
+
+  derived.originalCommand = command;
+
+  if (scene._hdr) {
+    derived.hdr = DerivedCommand.createHdrCommand(
+      command,
+      context,
+      derived.hdr,
+    );
+    command = derived.hdr.command;
+    derived = command.derivedCommands;
+  }
+
+  if (shadowsEnabled && command.receiveShadows) {
+    derived.shadows = ShadowMap.createReceiveDerivedCommand(
+      shadowMaps,
+      command,
+      shadowsDirty,
+      context,
+      derived.shadows,
+    );
+  }
+
+  if (command.pass === Pass.TRANSLUCENT && defined(oit) && oit.isSupported()) {
+    if (shadowsEnabled && command.receiveShadows) {
+      derived.oit = defined(derived.oit) ? derived.oit : {};
+      derived.oit.shadows = oit.createDerivedCommands(
+        derived.shadows.receiveCommand,
+        context,
+        derived.oit.shadows,
+      );
+    } else {
+      derived.oit = oit.createDerivedCommands(command, context, derived.oit);
+    }
+  }
+}
+
+function executeOverlay(scene, passState) {
+  scene._depthClearCommand.execute(scene.context, passState);
+
+  const camera = scene.camera;
+  let frustum;
+
+  if (defined(camera.frustum.fov)) {
+    frustum = camera.frustum.clone(scratchPerspectiveFrustum);
+  } else if (defined(camera.frustum.infiniteProjectionMatrix)) {
+    frustum = camera.frustum.clone(scratchPerspectiveOffCenterFrustum);
+  } else if (defined(camera.frustum.width)) {
+    frustum = camera.frustum.clone(scratchOrthographicFrustum);
+  } else {
+    frustum = camera.frustum.clone(scratchOrthographicOffCenterFrustum);
+  }
+
+  frustum.near = camera.frustum.near;
+  frustum.far = camera.frustum.far;
+
+  const uniformState = scene.context.uniformState;
+  uniformState.updateFrustum(frustum);
+  uniformState.updatePass(Pass.OVERLAY);
+
+  const context = scene.context;
+  const overlayCommands = scene._overlayCommandList;
+  const length = overlayCommands.length;
+
+  for (let i = 0; i < length; ++i) {
+    createPickDerivedCommands(scene, overlayCommands[i], false);
+    executePickCommand(overlayCommands[i], scene, context, passState);
+  }
+}
+
 /**
  * Returns an object with a <code>primitive</code> property that contains the first (top) primitive in the scene
  * at a particular window coordinate or undefined if nothing is at the location. Other properties may
@@ -326,7 +490,11 @@ Picking.prototype.pick = function (scene, windowPosition, width, height) {
   passState = pickFramebuffer.begin(drawingBufferRectangle, viewport);
 
   scene.updateAndExecuteCommands(passState, scratchColorZero);
-  scene.resolveFramebuffers(passState);
+  scene.resolveFramebuffers(passState, () => {
+    if (scene.enablePickOverlay) {
+      executeOverlay(scene, passState);
+    }
+  });
 
   const object = pickFramebuffer.end(drawingBufferRectangle);
   context.endFrame();
@@ -580,11 +748,6 @@ function renderTranslucentDepthForPick(scene, drawingBufferPosition) {
   context.endFrame();
 }
 
-const scratchPerspectiveFrustum = new PerspectiveFrustum();
-const scratchPerspectiveOffCenterFrustum = new PerspectiveOffCenterFrustum();
-const scratchOrthographicFrustum = new OrthographicFrustum();
-const scratchOrthographicOffCenterFrustum = new OrthographicOffCenterFrustum();
-
 Picking.prototype.pickPositionWorldCoordinates = function (
   scene,
   windowPosition,
@@ -709,6 +872,120 @@ Picking.prototype.pickPosition = function (scene, windowPosition, result) {
   }
 
   return result;
+};
+
+Picking.prototype.pickPositionNearest = function (
+  scene,
+  windowPosition,
+  width = 10,
+  height = 10,
+  result,
+) {
+  if (!scene.useDepthPicking) {
+    return;
+  }
+
+  Check.defined("windowPosition", windowPosition);
+
+  if (!scene.context.depthTexture) {
+    throw new DeveloperError(
+      "Picking from the depth buffer is not supported. Check pickPositionSupported.",
+    );
+  }
+
+  const key = windowPosition.toString();
+
+  if (this._pickPositionCacheDirty) {
+    this._pickPositionCache = {};
+    this._pickPositionCacheDirty = false;
+  } else if (this._pickPositionCache.hasOwnProperty(key)) {
+    return Cartesian3.clone(this._pickPositionCache[key], result);
+  }
+
+  const { context, frameState, camera, defaultView } = scene;
+  const { uniformState } = context;
+  scene.view = defaultView;
+
+  const drawingBufferPosition = SceneTransforms.transformWindowToDrawingBuffer(
+    scene,
+    windowPosition,
+    scratchPosition,
+  );
+  drawingBufferPosition.y = scene.drawingBufferHeight - drawingBufferPosition.y;
+
+  if (scene.pickTranslucentDepth) {
+    renderTranslucentDepthForPick(scene, drawingBufferPosition);
+  } else {
+    scene.updateFrameState();
+    uniformState.update(frameState);
+    scene.updateEnvironment();
+  }
+
+  let frustum;
+  if (defined(camera.frustum.fov)) {
+    frustum = camera.frustum.clone(scratchPerspectiveFrustum);
+  } else if (defined(camera.frustum.infiniteProjectionMatrix)) {
+    frustum = camera.frustum.clone(scratchPerspectiveOffCenterFrustum);
+  } else if (defined(camera.frustum.width)) {
+    frustum = camera.frustum.clone(scratchOrthographicFrustum);
+  } else {
+    frustum = camera.frustum.clone(scratchOrthographicOffCenterFrustum);
+  }
+
+  const frustumCommandsList = defaultView.frustumCommandsList;
+  for (let i = 0; i < frustumCommandsList.length; ++i) {
+    const depthArray = this.getPickDepth(scene, i).getDepthArray(
+      context,
+      drawingBufferPosition.x,
+      drawingBufferPosition.y,
+      width,
+      height,
+    );
+    if (!Array.isArray(depthArray)) {
+      continue;
+    }
+
+    const validDepths = depthArray.filter((d) => d !== 0);
+    validDepths.sort((a, b) => a - b);
+    const nearestDepth = validDepths[0];
+
+    if (nearestDepth > 0 && nearestDepth < 1) {
+      const frustumCommand = frustumCommandsList[i];
+      let originalZ;
+
+      if (scene.mode === SceneMode.SCENE2D) {
+        originalZ = camera.position.z;
+        camera.position.z = originalZ - frustumCommand.near + 1;
+        frustum.far = Math.max(1, frustumCommand.far - frustumCommand.near);
+        frustum.near = 1;
+        uniformState.update(frameState);
+        uniformState.updateFrustum(frustum);
+      } else {
+        frustum.near =
+          frustumCommand.near * (i !== 0 ? scene.opaqueFrustumNearOffset : 1);
+        frustum.far = frustumCommand.far;
+        uniformState.updateCamera(camera);
+        uniformState.updateFrustum(frustum);
+      }
+
+      result = SceneTransforms.drawingBufferToWorldCoordinates(
+        scene,
+        drawingBufferPosition,
+        nearestDepth,
+        result,
+      );
+
+      if (scene.mode === SceneMode.SCENE2D) {
+        camera.position.z = originalZ;
+        uniformState.update(frameState);
+      }
+
+      this._pickPositionCache[key] = Cartesian3.clone(result);
+      return result;
+    }
+  }
+
+  this._pickPositionCache[key] = undefined;
 };
 
 function drillPick(limit, pickCallback) {

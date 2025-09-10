@@ -754,6 +754,9 @@ function Scene(options) {
    */
   this.light = new SunLight();
 
+  this.enablePickOverlay = false;
+  this.disableGetTilesetHeight = false;
+
   // Give frameState, camera, and screen space camera controller initial state before rendering
   updateFrameNumber(this, 0.0, JulianDate.now());
   this.updateFrameState();
@@ -3720,7 +3723,7 @@ function updateAndClearFramebuffers(scene, passState, clearColor) {
 /**
  * @private
  */
-Scene.prototype.resolveFramebuffers = function (passState) {
+Scene.prototype.resolveFramebuffers = function (passState, callback) {
   const context = this._context;
   const environmentState = this._environmentState;
   const view = this._view;
@@ -3754,6 +3757,10 @@ Scene.prototype.resolveFramebuffers = function (passState) {
     translucentTileClassification.isSupported()
   ) {
     translucentTileClassification.execute(this, passState);
+  }
+
+  if (callback) {
+    callback();
   }
 
   if (usePostProcess) {
@@ -3798,6 +3805,14 @@ function getGlobeHeight(scene) {
     return;
   }
   const cartographic = scene.camera.positionCartographic;
+
+  if (scene.disableGetTilesetHeight) {
+    if (defined(scene._globe) && scene._globe.show && defined(cartographic)) {
+      return scene._globe.getHeight(cartographic);
+    }
+    return undefined;
+  }
+
   return scene.getHeight(cartographic);
 }
 
@@ -4028,6 +4043,13 @@ Scene.prototype.initializeFrame = function () {
 
   this._tweens.update();
 
+  if (
+    this.disableGetTilesetHeight &&
+    defined(this._removeUpdateHeightCallback)
+  ) {
+    this._globeHeightDirty = true;
+  }
+
   if (this._globeHeightDirty) {
     if (defined(this._removeUpdateHeightCallback)) {
       this._removeUpdateHeightCallback();
@@ -4037,17 +4059,19 @@ Scene.prototype.initializeFrame = function () {
     this._globeHeight = getGlobeHeight(this);
     this._globeHeightDirty = false;
 
-    const cartographic = this.camera.positionCartographic;
-    this._removeUpdateHeightCallback = this.updateHeight(
-      cartographic,
-      (updatedCartographic) => {
-        if (this.isDestroyed()) {
-          return;
-        }
+    if (!this.disableGetTilesetHeight) {
+      const cartographic = this.camera.positionCartographic;
+      this._removeUpdateHeightCallback = this.updateHeight(
+        cartographic,
+        (updatedCartographic) => {
+          if (this.isDestroyed()) {
+            return;
+          }
 
-        this._globeHeight = updatedCartographic.height;
-      },
-    );
+          this._globeHeight = updatedCartographic.height;
+        },
+      );
+    }
   }
   this._cameraUnderground = isCameraUnderground(this);
   this._globeTranslucencyState.update(this);
@@ -4564,6 +4588,45 @@ Scene.prototype.pickPositionWorldCoordinates = function (
  */
 Scene.prototype.pickPosition = function (windowPosition, result) {
   return this._picking.pickPosition(this, windowPosition, result);
+};
+
+/**
+ * Returns the cartesian position of the nearest pickable point at the specified window position.
+ * <p>
+ * This function reads the depth buffer to reconstruct the world coordinates of the closest
+ * object or terrain under the given screen position. It is more precise than normal pick
+ * methods because it uses the GPU-rendered depth buffer.
+ * </p>
+ * <p>
+ * If the scene has multiple overlapping objects at the same pixel, this function returns
+ * the position closest to the camera.
+ * </p>
+ * <p>
+ * Set {@link Scene#pickTranslucentDepth} to <code>true</code> to include translucent primitives;
+ * otherwise, translucent objects may be ignored.
+ * </p>
+ *
+ * @param {Cartesian2} windowPosition The window (screen) coordinates to pick.
+ * @param {Number} [width=10] The width of the pixel region to sample around the window position.
+ * @param {Number} [height=10] The height of the pixel region to sample around the window position.
+ * @param {Cartesian3} [result] An optional object to store the resulting position.
+ * @returns {Cartesian3|undefined} The Cartesian3 position of the nearest pickable point, or undefined if no valid depth is found.
+ *
+ * @exception {DeveloperError} Picking from the depth buffer is not supported. Check pickPositionSupported.
+ */
+Scene.prototype.pickPositionNearest = function (
+  windowPosition,
+  width = 10,
+  height = 10,
+  result,
+) {
+  return this._picking.pickPositionNearest(
+    this,
+    windowPosition,
+    width,
+    height,
+    result,
+  );
 };
 
 /**

@@ -104,6 +104,40 @@ PickDepth.prototype.getDepth = function (context, x, y) {
   return Cartesian4.dot(packedDepth, packedDepthScale);
 };
 
+PickDepth.prototype.getDepthArray = function (
+  context,
+  x,
+  y,
+  width = 10,
+  height = 10,
+) {
+  if (!defined(this.framebuffer)) {
+    return undefined;
+  }
+
+  const startX = x - Math.floor(width / 2);
+  const startY = y - Math.floor(height / 2);
+
+  const pixelData = context.readPixels({
+    x: startX,
+    y: startY,
+    width: width,
+    height: height,
+    framebuffer: this.framebuffer,
+  });
+
+  const unpacked = Cartesian4.unpackArray(pixelData);
+  const depthArray = [];
+
+  for (let i = 0; i < unpacked.length; i++) {
+    Cartesian4.divideByScalar(unpacked[i], 255, unpacked[i]);
+    const depth = Cartesian4.dot(unpacked[i], packedDepthScale);
+    depthArray.push(depth);
+  }
+
+  return depthArray;
+};
+
 PickDepth.prototype.executeCopyDepth = function (context, passState) {
   this._copyDepthCommand.execute(context, passState);
 };
