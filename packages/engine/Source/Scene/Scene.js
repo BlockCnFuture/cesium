@@ -754,6 +754,13 @@ function Scene(options) {
    */
   this.light = new SunLight();
 
+  /**
+   * When <code>true</code>, entities with <code>Pass.OVERLAY</code> can be picked.
+   * This allows interaction with overlay entities that are normally ignored during picking.
+   *
+   * @type {boolean}
+   * @default false
+   */
   this.enablePickOverlay = false;
   this.disableGetTilesetHeight = false;
 
@@ -2925,13 +2932,45 @@ function executeComputeCommands(scene) {
  *
  * @private
  */
-function executeOverlayCommands(scene, passState) {
-  scene.context.uniformState.updatePass(Pass.OVERLAY);
+// function executeOverlayCommands(scene, passState) {
+//   scene.context.uniformState.updatePass(Pass.OVERLAY);
+
+//   const context = scene.context;
+//   const commandList = scene._overlayCommandList;
+//   for (let i = 0; i < commandList.length; ++i) {
+//     commandList[i].execute(context, passState);
+//   }
+// }
+
+function executeOverlayCommands(scene, frameState) {
+  scene._depthClearCommand.execute(scene.context, frameState);
+
+  const camera = scene.camera;
+  let frustumClone;
+
+  if (defined(camera.frustum.fov)) {
+    frustumClone = camera.frustum.clone(scratchPerspectiveFrustum);
+  } else if (defined(camera.frustum.infiniteProjectionMatrix)) {
+    frustumClone = camera.frustum.clone(scratchPerspectiveOffCenterFrustum);
+  } else if (defined(camera.frustum.width)) {
+    frustumClone = camera.frustum.clone(scratchOrthographicFrustum);
+  } else {
+    frustumClone = camera.frustum.clone(scratchOrthographicOffCenterFrustum);
+  }
+
+  frustumClone.near = camera.frustum.near;
+  frustumClone.far = camera.frustum.far;
+
+  const uniformState = scene.context.uniformState;
+  uniformState.updateFrustum(frustumClone);
+  uniformState.updatePass(Pass.OVERLAY);
 
   const context = scene.context;
-  const commandList = scene._overlayCommandList;
-  for (let i = 0; i < commandList.length; ++i) {
-    commandList[i].execute(context, passState);
+  const overlayCommandList = scene._overlayCommandList;
+  const commandCount = overlayCommandList.length;
+
+  for (let i = 0; i < commandCount; ++i) {
+    overlayCommandList[i].execute(context, frameState);
   }
 }
 
@@ -4201,10 +4240,12 @@ function render(scene) {
 
   scene.updateEnvironment();
   scene.updateAndExecuteCommands(passState, backgroundColor);
-  scene.resolveFramebuffers(passState);
+  scene.resolveFramebuffers(passState, () => {
+    executeOverlayCommands(scene, passState);
+  });
 
   passState.framebuffer = undefined;
-  executeOverlayCommands(scene, passState);
+  //executeOverlayCommands(scene, passState);
 
   if (defined(scene.globe)) {
     scene.globe.endFrame(frameState);
