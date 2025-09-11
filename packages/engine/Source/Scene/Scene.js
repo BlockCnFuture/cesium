@@ -2932,45 +2932,13 @@ function executeComputeCommands(scene) {
  *
  * @private
  */
-// function executeOverlayCommands(scene, passState) {
-//   scene.context.uniformState.updatePass(Pass.OVERLAY);
-
-//   const context = scene.context;
-//   const commandList = scene._overlayCommandList;
-//   for (let i = 0; i < commandList.length; ++i) {
-//     commandList[i].execute(context, passState);
-//   }
-// }
-
-function executeOverlayCommands(scene, frameState) {
-  scene._depthClearCommand.execute(scene.context, frameState);
-
-  const camera = scene.camera;
-  let frustumClone;
-
-  if (defined(camera.frustum.fov)) {
-    frustumClone = camera.frustum.clone(scratchPerspectiveFrustum);
-  } else if (defined(camera.frustum.infiniteProjectionMatrix)) {
-    frustumClone = camera.frustum.clone(scratchPerspectiveOffCenterFrustum);
-  } else if (defined(camera.frustum.width)) {
-    frustumClone = camera.frustum.clone(scratchOrthographicFrustum);
-  } else {
-    frustumClone = camera.frustum.clone(scratchOrthographicOffCenterFrustum);
-  }
-
-  frustumClone.near = camera.frustum.near;
-  frustumClone.far = camera.frustum.far;
-
-  const uniformState = scene.context.uniformState;
-  uniformState.updateFrustum(frustumClone);
-  uniformState.updatePass(Pass.OVERLAY);
+function executeOverlayCommands(scene, passState) {
+  scene.context.uniformState.updatePass(Pass.OVERLAY);
 
   const context = scene.context;
-  const overlayCommandList = scene._overlayCommandList;
-  const commandCount = overlayCommandList.length;
-
-  for (let i = 0; i < commandCount; ++i) {
-    overlayCommandList[i].execute(context, frameState);
+  const commandList = scene._overlayCommandList;
+  for (let i = 0; i < commandList.length; ++i) {
+    commandList[i].execute(context, passState);
   }
 }
 
@@ -3762,7 +3730,7 @@ function updateAndClearFramebuffers(scene, passState, clearColor) {
 /**
  * @private
  */
-Scene.prototype.resolveFramebuffers = function (passState, callback) {
+Scene.prototype.resolveFramebuffers = function (passState) {
   const context = this._context;
   const environmentState = this._environmentState;
   const view = this._view;
@@ -3796,10 +3764,6 @@ Scene.prototype.resolveFramebuffers = function (passState, callback) {
     translucentTileClassification.isSupported()
   ) {
     translucentTileClassification.execute(this, passState);
-  }
-
-  if (callback) {
-    callback();
   }
 
   if (usePostProcess) {
@@ -3844,13 +3808,6 @@ function getGlobeHeight(scene) {
     return;
   }
   const cartographic = scene.camera.positionCartographic;
-
-  if (scene.disableGetTilesetHeight) {
-    if (defined(scene._globe) && scene._globe.show && defined(cartographic)) {
-      return scene._globe.getHeight(cartographic);
-    }
-    return undefined;
-  }
 
   return scene.getHeight(cartographic);
 }
@@ -4082,13 +4039,6 @@ Scene.prototype.initializeFrame = function () {
 
   this._tweens.update();
 
-  if (
-    this.disableGetTilesetHeight &&
-    defined(this._removeUpdateHeightCallback)
-  ) {
-    this._globeHeightDirty = true;
-  }
-
   if (this._globeHeightDirty) {
     if (defined(this._removeUpdateHeightCallback)) {
       this._removeUpdateHeightCallback();
@@ -4098,19 +4048,17 @@ Scene.prototype.initializeFrame = function () {
     this._globeHeight = getGlobeHeight(this);
     this._globeHeightDirty = false;
 
-    if (!this.disableGetTilesetHeight) {
-      const cartographic = this.camera.positionCartographic;
-      this._removeUpdateHeightCallback = this.updateHeight(
-        cartographic,
-        (updatedCartographic) => {
-          if (this.isDestroyed()) {
-            return;
-          }
+    const cartographic = this.camera.positionCartographic;
+    this._removeUpdateHeightCallback = this.updateHeight(
+      cartographic,
+      (updatedCartographic) => {
+        if (this.isDestroyed()) {
+          return;
+        }
 
-          this._globeHeight = updatedCartographic.height;
-        },
-      );
-    }
+        this._globeHeight = updatedCartographic.height;
+      },
+    );
   }
   this._cameraUnderground = isCameraUnderground(this);
   this._globeTranslucencyState.update(this);
@@ -4240,12 +4188,10 @@ function render(scene) {
 
   scene.updateEnvironment();
   scene.updateAndExecuteCommands(passState, backgroundColor);
-  scene.resolveFramebuffers(passState, () => {
-    executeOverlayCommands(scene, passState);
-  });
+  scene.resolveFramebuffers(passState);
 
   passState.framebuffer = undefined;
-  //executeOverlayCommands(scene, passState);
+  executeOverlayCommands(scene, passState);
 
   if (defined(scene.globe)) {
     scene.globe.endFrame(frameState);
