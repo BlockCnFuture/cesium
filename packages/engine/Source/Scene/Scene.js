@@ -2495,7 +2495,7 @@ function createWorkingFrustum(camera) {
 function obtainTranslucentCommandExecutionFunction(scene) {
   if (scene._environmentState.useOIT) {
     if (!defined(scene._executeOITFunction)) {
-      const { view, context } = scene;
+      const { view, context, prefer3dTiles } = scene;
       scene._executeOITFunction = function (
         scene,
         executeFunction,
@@ -2503,7 +2503,7 @@ function obtainTranslucentCommandExecutionFunction(scene) {
         commands,
         invertClassification,
       ) {
-        view.globeDepth.prepareColorTextures(context);
+        view.globeDepth.prepareColorTextures(context, prefer3dTiles);
         view.oit.executeCommands(
           scene,
           executeFunction,
