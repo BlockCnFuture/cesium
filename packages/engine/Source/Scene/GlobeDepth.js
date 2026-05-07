@@ -306,20 +306,18 @@ GlobeDepth.prototype.executeCopyDepth = function (context, passState) {
  *
  * @param {Context} context The context used for rendering.
  * @param {PassState} passState Render state for subsequent rendering passes.
- * @param {boolean} clearGlobeDepth <code>true</code> if the globe depth was cleared.
  * @param {Texture} [depthTexture] The depth texture to copy.
  */
 GlobeDepth.prototype.executeUpdateDepth = function (
   context,
   passState,
-  clearGlobeDepth,
   depthTexture,
 ) {
   const depthTextureToCopy = defined(depthTexture)
     ? depthTexture
     : passState.framebuffer.depthStencilTexture;
   if (
-    !clearGlobeDepth &&
+    !this._clearGlobeDepth &&
     depthTextureToCopy === this.colorFramebufferManager.getDepthStencilTexture()
   ) {
     // Fast path - the depth texture can be copied normally.

@@ -53,7 +53,5 @@ function PassState(context) {
    * @default undefined
    */
   this.viewport = undefined;
-
-  this.onlyOn3DTiles = false;
 }
 export default PassState;
