@@ -782,7 +782,8 @@ ImageryLayer.prototype._createTileImagerySkeletons = function (
   // images attached to a terrain tile than there are available texture units.  So that's for the future.
   const errorRatio = 1.0;
   const targetGeometricError =
-    errorRatio * terrainProvider.getLevelMaximumGeometricError(tile.level);
+    errorRatio *
+    terrainProvider.getLevelMaximumGeometricError(tile.level, tile.x, tile.y);
   let imageryLevel = getLevelWithMaximumTexelSpacing(
     this,
     targetGeometricError,

@@ -1248,7 +1248,11 @@ function screenSpaceError(primitive, frameState, tile) {
   }
 
   const maxGeometricError =
-    primitive._tileProvider.getLevelMaximumGeometricError(tile.level);
+    primitive._tileProvider.getLevelMaximumGeometricError(
+      tile.level,
+      tile.x,
+      tile.y,
+    );
 
   const distance = tile._distance;
   const height = frameState.context.drawingBufferHeight;
@@ -1279,7 +1283,11 @@ function screenSpaceError2D(primitive, frameState, tile) {
   const height = context.drawingBufferHeight;
 
   const maxGeometricError =
-    primitive._tileProvider.getLevelMaximumGeometricError(tile.level);
+    primitive._tileProvider.getLevelMaximumGeometricError(
+      tile.level,
+      tile.x,
+      tile.y,
+    );
   const pixelSize =
     Math.max(frustum.top - frustum.bottom, frustum.right - frustum.left) /
     Math.max(width, height);
