@@ -963,11 +963,7 @@ function createFillMesh(tileProvider, frameState, tile, vertexArraysToDestroy) {
   // Earth's curvature. But the height range will also typically be well within
   // the allowed geometric error for those levels. So fill such tiles with a
   // constant-height heightmap.
-  const geometricError = tileProvider.getLevelMaximumGeometricError(
-    tile.level,
-    tile.x,
-    tile.y,
-  );
+  const geometricError = tileProvider.getLevelMaximumGeometricError(tile.level);
   const minCutThroughRadius = ellipsoid.maximumRadius - geometricError;
   let maxTileWidth =
     Math.acos(minCutThroughRadius / ellipsoid.maximumRadius) * 4.0;
