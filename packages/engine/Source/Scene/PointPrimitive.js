@@ -40,7 +40,7 @@ import Check from "../Core/Check.js";
  * @internalConstructor
  * @class
  *
- * @demo {@link https://sandcastle.cesium.com/index.html?src=Points.html|Cesium Sandcastle Points Demo}
+ * @demo {@link https://sandcastle.cesium.com/index.html?id=points|Cesium Sandcastle Points Demo}
  */
 function PointPrimitive(options, pointPrimitiveCollection) {
   options = options ?? Frozen.EMPTY_OBJECT;

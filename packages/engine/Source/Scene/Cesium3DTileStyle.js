@@ -1,3 +1,4 @@
+import addAllToArray from "../Core/addAllToArray.js";
 import clone from "../Core/clone.js";
 import Frozen from "../Core/Frozen.js";
 import defined from "../Core/defined.js";
@@ -73,6 +74,9 @@ function Cesium3DTileStyle(style) {
   this._labelVerticalOrigin = undefined;
   this._meta = undefined;
 
+  // Vector Tiles in 3D Tiles 2.0.
+  this._lineWidth = undefined;
+
   this._colorShaderFunction = undefined;
   this._showShaderFunction = undefined;
   this._pointSizeShaderFunction = undefined;
@@ -115,6 +119,9 @@ function setup(that, styleJson) {
   that.verticalOrigin = styleJson.verticalOrigin;
   that.labelHorizontalOrigin = styleJson.labelHorizontalOrigin;
   that.labelVerticalOrigin = styleJson.labelVerticalOrigin;
+
+  // Vector Tiles in 3D Tiles 2.0.
+  that.lineWidth = styleJson.lineWidth;
 
   const meta = {};
   if (defined(styleJson.meta)) {
@@ -1284,6 +1291,22 @@ Object.defineProperties(Cesium3DTileStyle.prototype, {
   },
 
   /**
+   * Internal-only, supported in Vector Tiles with 3D Tiles 2.0.
+   * @memberof Cesium3DTileStyle.prototype
+   * @type {StyleExpression}
+   * @ignore
+   */
+  lineWidth: {
+    get: function () {
+      return this._lineWidth;
+    },
+    set: function (value) {
+      this._lineWidth = getExpression(this, value);
+      this._style.lineWidth = getJsonFromExpression(this._lineWidth);
+    },
+  },
+
+  /**
    * Gets or sets the object containing application-specific expression that can be explicitly
    * evaluated, e.g., for display in a UI.
    *
@@ -1452,15 +1475,15 @@ Cesium3DTileStyle.prototype.getVariables = function () {
   let variables = [];
 
   if (defined(this.color) && defined(this.color.getVariables)) {
-    variables.push.apply(variables, this.color.getVariables());
+    addAllToArray(variables, this.color.getVariables());
   }
 
   if (defined(this.show) && defined(this.show.getVariables)) {
-    variables.push.apply(variables, this.show.getVariables());
+    addAllToArray(variables, this.show.getVariables());
   }
 
   if (defined(this.pointSize) && defined(this.pointSize.getVariables)) {
-    variables.push.apply(variables, this.pointSize.getVariables());
+    addAllToArray(variables, this.pointSize.getVariables());
   }
 
   // Remove duplicates

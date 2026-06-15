@@ -101,6 +101,8 @@ describe(
       "./Data/Cesium3DTiles/PointCloud/PointCloudWGS84/tileset.json";
     const pointCloudBatchedUrl =
       "./Data/Cesium3DTiles/PointCloud/PointCloudBatched/tileset.json";
+    const pointCloudBatchedJsonOnlyUrl =
+      "./Data/Cesium3DTiles/PointCloud/PointCloudBatchedJsonOnly/tileset.json";
     const pointCloudWithPerPointPropertiesUrl =
       "./Data/Cesium3DTiles/PointCloud/PointCloudWithPerPointProperties/tileset.json";
     const pointCloudWithUnicodePropertyIdsUrl =
@@ -705,6 +707,16 @@ describe(
         });
       });
 
+      it("renders point cloud with batch table that contains only JSON data", function () {
+        // Regression test for https://github.com/CesiumGS/cesium/issues/11166
+        return Cesium3DTilesTester.loadTileset(
+          scene,
+          pointCloudBatchedJsonOnlyUrl,
+        ).then(function (tileset) {
+          Cesium3DTilesTester.expectRender(scene, tileset);
+        });
+      });
+
       it("renders point cloud with per-point properties", function () {
         return Cesium3DTilesTester.loadTileset(
           scene,
@@ -1170,7 +1182,7 @@ describe(
         });
         scene.msaaSamples = 1;
         noAttenuationPixelCount = scene.logarithmicDepthBuffer ? 20 : 16;
-        const center = new Cartesian3.fromRadians(
+        const center = Cartesian3.fromRadians(
           centerLongitude,
           centerLatitude,
           5.0,

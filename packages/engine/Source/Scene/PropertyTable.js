@@ -3,6 +3,8 @@ import Frozen from "../Core/Frozen.js";
 import DeveloperError from "../Core/DeveloperError.js";
 import defined from "../Core/defined.js";
 import JsonMetadataTable from "./JsonMetadataTable.js";
+import addAllToArray from "../Core/addAllToArray.js";
+import { destroyObject } from "@cesium/engine";
 
 /**
  * A property table for use with the <code>EXT_structural_metadata</code> extension or
@@ -52,6 +54,7 @@ function PropertyTable(options) {
   this._metadataTable = options.metadataTable;
   this._jsonMetadataTable = options.jsonMetadataTable;
   this._batchTableHierarchy = options.batchTableHierarchy;
+  this._texture = options.texture; // Property table buffer data packed into a GPU texture
 }
 
 Object.defineProperties(PropertyTable.prototype, {
@@ -113,6 +116,23 @@ Object.defineProperties(PropertyTable.prototype, {
   },
 
   /**
+   * The properties stored in this table.
+   *
+   * @memberof PropertyTable.prototype
+   * @type {Object<string, MetadataTableProperty>}
+   * @readonly
+   */
+  properties: {
+    get: function () {
+      if (defined(this._metadataTable)) {
+        return this._metadataTable.properties;
+      }
+
+      return undefined;
+    },
+  },
+
+  /**
    * Extra user-defined properties.
    *
    * @memberof PropertyTable.prototype
@@ -161,6 +181,20 @@ Object.defineProperties(PropertyTable.prototype, {
       }
 
       return totalByteLength;
+    },
+  },
+
+  /**
+   * The texture containing the property table data, if any.
+   *
+   * @memberof PropertyTable.prototype
+   * @type {Texture | undefined}
+   * @readonly
+   * @private
+   */
+  texture: {
+    get: function () {
+      return this._texture;
     },
   },
 });
@@ -296,24 +330,18 @@ PropertyTable.prototype.getPropertyIds = function (index, results) {
 
   if (defined(this._metadataTable)) {
     // concat in place to avoid unnecessary array allocation
-    results.push.apply(
-      results,
-      this._metadataTable.getPropertyIds(scratchResults),
-    );
+    const ids = this._metadataTable.getPropertyIds(scratchResults);
+    addAllToArray(results, ids);
   }
 
   if (defined(this._batchTableHierarchy)) {
-    results.push.apply(
-      results,
-      this._batchTableHierarchy.getPropertyIds(index, scratchResults),
-    );
+    const ids = this._batchTableHierarchy.getPropertyIds(index, scratchResults);
+    addAllToArray(results, ids);
   }
 
   if (defined(this._jsonMetadataTable)) {
-    results.push.apply(
-      results,
-      this._jsonMetadataTable.getPropertyIds(scratchResults),
-    );
+    const ids = this._jsonMetadataTable.getPropertyIds(scratchResults);
+    addAllToArray(results, ids);
   }
 
   return results;
@@ -536,6 +564,16 @@ PropertyTable.prototype.getExactClassName = function (featureId) {
   }
 
   return hierarchy.getClassName(featureId);
+};
+
+/**
+ * Destroys any resources that need cleaning up in the property table.
+ *
+ * @private
+ */
+PropertyTable.prototype.destroy = function () {
+  this._texture = this._texture && this._texture.destroy();
+  return destroyObject(this);
 };
 
 export default PropertyTable;

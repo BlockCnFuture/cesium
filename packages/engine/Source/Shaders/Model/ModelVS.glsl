@@ -14,6 +14,10 @@ void main()
     ProcessedAttributes attributes;
     initializeAttributes(attributes);
 
+    #ifdef HAS_IMAGERY
+    initializeImageryAttributes();
+    #endif
+
     // Dequantize the quantized ones and add them to the
     // attributes struct.
     #ifdef USE_DEQUANTIZATION
@@ -91,7 +95,7 @@ void main()
     Metadata metadata;
     MetadataClass metadataClass;
     MetadataStatistics metadataStatistics;
-    metadataStage(metadata, metadataClass, metadataStatistics, attributes);
+    metadataStage(featureIds, metadata, metadataClass, metadataStatistics, attributes);
 
     #ifdef HAS_VERTICAL_EXAGGERATION
     verticalExaggerationStage(attributes);
@@ -105,6 +109,10 @@ void main()
     // Compute the final position in each coordinate system needed.
     // This returns the value that will be assigned to gl_Position.
     vec4 positionClip = geometryStage(attributes, modelView, normal);
+
+    #if defined(HAS_LINE_CUMULATIVE_DISTANCE) || defined(HAS_LINE_PATTERN)
+    lineStyleStageVS(attributes);
+    #endif
 
     // This must go after the geometry stage as it needs v_positionWC
     #ifdef HAS_ATMOSPHERE
@@ -138,6 +146,8 @@ void main()
         gl_PointSize = vsOutput.pointSize;
         #elif defined(HAS_POINT_CLOUD_POINT_SIZE_STYLE) || defined(HAS_POINT_CLOUD_ATTENUATION)
         gl_PointSize = pointCloudPointSizeStylingStage(attributes, metadata);
+        #elif defined(HAS_POINT_DIAMETER)
+        gl_PointSize = u_pointDiameter;
         #else
         gl_PointSize = 1.0;
         #endif
@@ -150,6 +160,10 @@ void main()
     //
     // We will discard points with v_pointCloudShow == 0 in the fragment shader.
     gl_Position = positionClip;
+
+    #ifdef HAS_EDGE_VISIBILITY
+    edgeVisibilityStageVS();
+    #endif
 
     #ifdef HAS_POINT_CLOUD_SHOW_STYLE
     v_pointCloudShow = show;

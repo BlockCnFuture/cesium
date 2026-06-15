@@ -148,7 +148,7 @@ function ScreenSpaceCameraController(scene) {
 
   /**
    * A multiplier for the speed at which the camera will zoom.
-   * @type {Number}
+   * @type {number}
    * @default 5.0
    */
   this.zoomFactor = 5.0;
@@ -291,6 +291,8 @@ function ScreenSpaceCameraController(scene) {
   this._minimumTrackBallHeight = this.minimumTrackBallHeight;
   /**
    * When disabled, the values of <code>maximumZoomDistance</code> and <code>minimumZoomDistance</code> are ignored.
+   * Also used in conjunction with {@link Cesium3DTileset#enableCollision} to prevent the camera from moving through or below a 3D Tileset surface.
+   * This may also affect clamping behavior when using {@link HeightReference.CLAMP_TO_GROUND} on 3D Tiles.
    * @type {boolean}
    * @default true
    */
@@ -2386,6 +2388,19 @@ function zoom3D(controller, startPosition, movement) {
   let distance;
   if (defined(intersection)) {
     distance = Cartesian3.distance(ray.origin, intersection);
+  }
+
+  // In tracking/lookAt mode (_globe is undefined), pickPosition can hit terrain
+  // behind the intended target. Ignore farther picks to prevent zoom snap.
+  if (!defined(controller._globe) && defined(distance)) {
+    const targetDistance = camera.getMagnitude();
+    if (targetDistance < distance) {
+      intersection = undefined;
+      distance = undefined;
+    }
+  }
+
+  if (defined(distance)) {
     preIntersectionDistance = distance;
   }
 

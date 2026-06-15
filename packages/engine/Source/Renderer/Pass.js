@@ -1,6 +1,9 @@
+// @ts-check
+
 /**
  * The render pass for a command.
  *
+ * @enum {number}
  * @private
  */
 const Pass = {
@@ -15,13 +18,19 @@ const Pass = {
   COMPUTE: 1,
   GLOBE: 2,
   TERRAIN_CLASSIFICATION: 3,
-  CESIUM_3D_TILE: 4,
-  CESIUM_3D_TILE_CLASSIFICATION: 5,
-  CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW: 6,
-  OPAQUE: 7,
-  TRANSLUCENT: 8,
-  VOXELS: 9,
-  OVERLAY: 10,
-  NUMBER_OF_PASSES: 11,
+  CESIUM_3D_TILE_EDGES: 4,
+  CESIUM_3D_TILE: 5,
+  CESIUM_3D_TILE_CLASSIFICATION: 6,
+  CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW: 7,
+  OPAQUE: 8,
+  TRANSLUCENT: 9,
+  VOXELS: 10,
+  GAUSSIAN_SPLATS: 11,
+  CESIUM_3D_TILE_EDGES_DIRECT: 12,
+  OVERLAY: 13,
+  NUMBER_OF_PASSES: 14,
 };
-export default Object.freeze(Pass);
+
+Object.freeze(Pass);
+
+export default Pass;

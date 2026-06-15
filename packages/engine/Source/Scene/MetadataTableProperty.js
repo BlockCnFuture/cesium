@@ -10,6 +10,7 @@ import oneTimeWarning from "../Core/oneTimeWarning.js";
 import MetadataComponentType from "./MetadataComponentType.js";
 import MetadataClassProperty from "./MetadataClassProperty.js";
 import MetadataType from "./MetadataType.js";
+import addAllToArray from "../Core/addAllToArray.js";
 
 /**
  * A binary property in a {@MetadataTable}
@@ -291,6 +292,20 @@ Object.defineProperties(MetadataTableProperty.prototype, {
       return this._byteLength;
     },
   },
+
+  /**
+   * The class property that this table property corresponds to.
+   *
+   * @memberof MetadataTableProperty.prototype
+   * @type {MetadataClassProperty}
+   * @readonly
+   * @private
+   */
+  classProperty: {
+    get: function () {
+      return this._classProperty;
+    },
+  },
 });
 
 /**
@@ -374,7 +389,7 @@ function flatten(values) {
   for (let i = 0; i < values.length; i++) {
     const value = values[i];
     if (Array.isArray(value)) {
-      result.push.apply(result, value);
+      addAllToArray(result, value);
     } else {
       result.push(value);
     }
@@ -548,7 +563,6 @@ function getInt64NumberFallback(index, values) {
 function getInt64BigIntFallback(index, values) {
   const dataView = values.dataView;
   const byteOffset = index * 8;
-  // eslint-disable-next-line no-undef
   let value = BigInt(0);
   const isNegative = (dataView.getUint8(byteOffset + 7) & 0x80) > 0;
   let carrying = true;
@@ -564,7 +578,7 @@ function getInt64BigIntFallback(index, values) {
         byte = ~byte & 0xff;
       }
     }
-    value += BigInt(byte) * (BigInt(1) << BigInt(i * 8)); // eslint-disable-line
+    value += BigInt(byte) * (BigInt(1) << BigInt(i * 8));
   }
   if (isNegative) {
     value = -value;
@@ -591,14 +605,11 @@ function getUint64BigIntFallback(index, values) {
   const byteOffset = index * 8;
 
   // Split 64-bit number into two 32-bit (4-byte) parts
-  // eslint-disable-next-line no-undef
   const left = BigInt(dataView.getUint32(byteOffset, true));
 
-  // eslint-disable-next-line no-undef
   const right = BigInt(dataView.getUint32(byteOffset + 4, true));
 
   // Combine the two 32-bit values
-  // eslint-disable-next-line no-undef
   const value = left + BigInt(4294967296) * right;
 
   return value;
@@ -769,7 +780,6 @@ function BufferView(bufferView, componentType, length) {
         return getInt64BigIntFallback(index, that);
       };
     } else {
-      // eslint-disable-next-line
       typedArray = new BigInt64Array(
         bufferView.buffer,
         bufferView.byteOffset,
@@ -777,7 +787,7 @@ function BufferView(bufferView, componentType, length) {
       );
       setFunction = function (index, value) {
         // Convert the number to a BigInt before setting the value in the typed array
-        that.typedArray[index] = BigInt(value); // eslint-disable-line
+        that.typedArray[index] = BigInt(value);
       };
     }
   } else if (componentType === MetadataComponentType.UINT64) {
@@ -803,7 +813,6 @@ function BufferView(bufferView, componentType, length) {
         return getUint64BigIntFallback(index, that);
       };
     } else {
-      // eslint-disable-next-line
       typedArray = new BigUint64Array(
         bufferView.buffer,
         bufferView.byteOffset,
@@ -811,7 +820,7 @@ function BufferView(bufferView, componentType, length) {
       );
       setFunction = function (index, value) {
         // Convert the number to a BigInt before setting the value in the typed array
-        that.typedArray[index] = BigInt(value); // eslint-disable-line
+        that.typedArray[index] = BigInt(value);
       };
     }
   } else {

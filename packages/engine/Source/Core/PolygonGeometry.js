@@ -596,7 +596,7 @@ function createGeometryFromPositionsExtruded(
  * @see PolygonGeometry#createGeometry
  * @see PolygonGeometry#fromPositions
  *
- * @demo {@link https://sandcastle.cesium.com/index.html?src=Polygon.html|Cesium Sandcastle Polygon Demo}
+ * @demo {@link https://sandcastle.cesium.com/index.html?id=polygon|Cesium Sandcastle Polygon Demo}
  *
  * @example
  * // 1. create a polygon from points
@@ -876,6 +876,7 @@ const dummyOptions = {
  * @param {number[]} array The packed array.
  * @param {number} [startingIndex=0] The starting index of the element to be unpacked.
  * @param {PolygonGeometry} [result] The object into which to store the result.
+ * @returns {PolygonGeometry} The modified result parameter or a new PolygonGeometry instance if one was not provided.
  */
 PolygonGeometry.unpack = function (array, startingIndex, result) {
   //>>includeStart('debug', pragmas.debug);

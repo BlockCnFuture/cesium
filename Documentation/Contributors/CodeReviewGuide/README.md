@@ -102,7 +102,7 @@ If you are working on a a shorter pull request (like a bug fix) with a few commi
 
 When in doubt, merge.
 
-Futher Reading: [Merge vs Rebase](https://www.derekgourlay.com/blog/git-when-to-merge-vs-when-to-rebase/).
+Further Reading: [Merge vs Rebase](https://www.derekgourlay.com/blog/git-when-to-merge-vs-when-to-rebase/).
 
 #### Merge
 
@@ -148,7 +148,7 @@ for more info.
 
 will checkout pull request [#3941](https://github.com/CesiumGS/cesium/pull/3941).
 
-More details can be found [here](https://cli.github.com/manual/gh_pr_checkout).
+More details can be found in the [GitHub CLI manual](https://cli.github.com/manual/gh_pr_checkout).
 
 #### Using git
 

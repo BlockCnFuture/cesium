@@ -20,6 +20,7 @@ import ClippingPlaneCollection from "../ClippingPlaneCollection.js";
 import ClippingPolygonCollection from "../ClippingPolygonCollection.js";
 import DynamicEnvironmentMapManager from "../DynamicEnvironmentMapManager.js";
 import ColorBlendMode from "../ColorBlendMode.js";
+import EdgeDisplayMode from "../EdgeDisplayMode.js";
 import GltfLoader from "../GltfLoader.js";
 import HeightReference, {
   isHeightReferenceRelative,
@@ -43,6 +44,7 @@ import oneTimeWarning from "../../Core/oneTimeWarning.js";
 import PntsLoader from "./PntsLoader.js";
 import StyleCommandsNeeded from "./StyleCommandsNeeded.js";
 import pickModel from "./pickModel.js";
+import ModelImagery from "./ModelImagery.js";
 
 /**
  * <div class="notice">
@@ -69,6 +71,14 @@ import pickModel from "./pickModel.js";
  *  </li>
  *  <li>
  *  {@link https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Vendor/EXT_mesh_gpu_instancing|EXT_mesh_gpu_instancing}
+ *  </li>
+ *  <li>
+ *  {@link https://github.com/KhronosGroup/glTF/pull/2514|EXT_mesh_primitive_restart}
+ *  </li>
+ *  <li>
+ *  {@link https://github.com/KhronosGroup/glTF/pull/2479|EXT_mesh_primitive_edge_visibility}
+ *  (edges are hidden by default; set {@link EdgeDisplayMode} via
+ *  {@link Model#edgeDisplayMode} or {@link Cesium3DTileset#edgeDisplayMode} to display them)
  *  </li>
  *  <li>
  *  {@link https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Vendor/EXT_meshopt_compression|EXT_meshopt_compression}
@@ -147,6 +157,7 @@ import pickModel from "./pickModel.js";
  * @privateParam {Color} [options.color] A color that blends with the model's rendered color.
  * @privateParam {ColorBlendMode} [options.colorBlendMode=ColorBlendMode.HIGHLIGHT] Defines how the color blends with the model.
  * @privateParam {number} [options.colorBlendAmount=0.5] Value used to determine the color strength when the <code>colorBlendMode</code> is <code>MIX</code>. A value of 0.0 results in the model's rendered color while a value of 1.0 results in a solid color, with any value in-between resulting in a mix of the two.
+ * @privateParam {EdgeDisplayMode} [options.edgeDisplayMode=EdgeDisplayMode.SURFACES_ONLY] Controls how edges from the {@link https://github.com/KhronosGroup/glTF/pull/2479|EXT_mesh_primitive_edge_visibility} extension are rendered relative to surface geometry.
  * @privateParam {Color} [options.silhouetteColor=Color.RED] The silhouette color. If more than 256 models have silhouettes enabled, there is a small chance that overlapping models will have minor artifacts.
  * @privateParam {number} [options.silhouetteSize=0.0] The size of the silhouette in pixels.
  * @privateParam {boolean} [options.enableShowOutline=true] Whether to enable outlines for models using the {@link https://github.com/KhronosGroup/glTF/tree/master/extensions/2.0/Vendor/CESIUM_primitive_outline|CESIUM_primitive_outline} extension. This can be set to false to avoid the additional processing of geometry at load time. When false, the showOutlines and outlineColor options are ignored.
@@ -171,7 +182,7 @@ import pickModel from "./pickModel.js";
  *
  * @see Model.fromGltfAsync
  *
- * @demo {@link https://sandcastle.cesium.com/index.html?src=3D%20Models.html|Cesium Sandcastle Models Demo}
+ * @demo {@link https://sandcastle.cesium.com/index.html?id=3d-models|Cesium Sandcastle Models Demo}
  */
 function Model(options) {
   options = options ?? Frozen.EMPTY_OBJECT;
@@ -382,6 +393,8 @@ function Model(options) {
   }
   this._clippingPolygonsState = 0; // If this value changes, the shaders need to be regenerated.
 
+  this._modelImagery = new ModelImagery(this);
+
   this._lightColor = Cartesian3.clone(options.lightColor);
 
   this._imageBasedLighting = defined(options.imageBasedLighting)
@@ -411,6 +424,8 @@ function Model(options) {
   this._enableDebugWireframe = options.enableDebugWireframe ?? false;
   this._enableShowOutline = options.enableShowOutline ?? true;
   this._debugWireframe = options.debugWireframe ?? false;
+  this._edgeDisplayMode =
+    options.edgeDisplayMode ?? EdgeDisplayMode.SURFACES_ONLY;
 
   // Warning for improper setup of debug wireframe
   if (
@@ -1199,6 +1214,29 @@ Object.defineProperties(Model.prototype, {
   },
 
   /**
+   * Controls how edges from the
+   * {@link https://github.com/KhronosGroup/glTF/pull/2479|EXT_mesh_primitive_edge_visibility}
+   * glTF extension are rendered relative to surface geometry. Primitives that
+   * do not declare the extension are unaffected by this setting.
+   *
+   * @memberof Model.prototype
+   *
+   * @type {EdgeDisplayMode}
+   *
+   * @default EdgeDisplayMode.SURFACES_ONLY
+   *
+   * @experimental This feature is using part of the glTF spec that is not yet final and is subject to change without Cesium's standard deprecation policy.
+   */
+  edgeDisplayMode: {
+    get: function () {
+      return this._edgeDisplayMode;
+    },
+    set: function (value) {
+      this._edgeDisplayMode = value;
+    },
+  },
+
+  /**
    * Whether or not to render the model.
    *
    * @memberof Model.prototype
@@ -1372,6 +1410,28 @@ Object.defineProperties(Model.prototype, {
   hasVerticalExaggeration: {
     get: function () {
       return this._hasVerticalExaggeration;
+    },
+  },
+
+  /**
+   * If this model is part of a <code>Model3DTileContent</code> of a tileset,
+   * then this will return the <code>ImageryLayerCollection</code>
+   * of that tileset. Otherwise, <code>undefined</code> is returned.
+   *
+   * @memberof Model.prototype
+   * @type {ImageryLayerCollection|undefined}
+   * @readonly
+   * @private
+   */
+  imageryLayers: {
+    get: function () {
+      if (defined(this._content)) {
+        const tileset = this._content.tileset;
+        if (defined(tileset)) {
+          return tileset.imageryLayers;
+        }
+      }
+      return undefined;
     },
   },
 
@@ -1926,6 +1986,19 @@ Model.prototype.update = function (frameState) {
   // is currently morphing.
   if (!this._resourcesLoaded || frameState.mode === SceneMode.MORPHING) {
     return;
+  }
+
+  const modelImagery = this._modelImagery;
+  modelImagery.update(frameState);
+  if (!modelImagery.ready) {
+    // If the imagery loading should not happen asynchronously,
+    // then do not let the model count as 'ready' until the
+    // modelImagery is 'ready'
+    const asynchronouslyLoadImagery =
+      this._content?.tileset?._asynchronouslyLoadImagery ?? false;
+    if (!asynchronouslyLoadImagery) {
+      return;
+    }
   }
 
   updateFeatureTableId(this);
@@ -2900,6 +2973,7 @@ Model.prototype.destroyModelResources = function () {
  * @param {Color} [options.color] A color that blends with the model's rendered color.
  * @param {ColorBlendMode} [options.colorBlendMode=ColorBlendMode.HIGHLIGHT] Defines how the color blends with the model.
  * @param {number} [options.colorBlendAmount=0.5] Value used to determine the color strength when the <code>colorBlendMode</code> is <code>MIX</code>. A value of 0.0 results in the model's rendered color while a value of 1.0 results in a solid color, with any value in-between resulting in a mix of the two.
+ * @param {EdgeDisplayMode} [options.edgeDisplayMode=EdgeDisplayMode.SURFACES_ONLY] Controls how edges from the {@link https://github.com/KhronosGroup/glTF/pull/2479|EXT_mesh_primitive_edge_visibility} extension are rendered relative to surface geometry.
  * @param {Color} [options.silhouetteColor=Color.RED] The silhouette color. If more than 256 models have silhouettes enabled, there is a small chance that overlapping models will have minor artifacts.
  * @param {number} [options.silhouetteSize=0.0] The size of the silhouette in pixels.
  * @param {boolean} [options.enableShowOutline=true] Whether to enable outlines for models using the {@link https://github.com/KhronosGroup/glTF/tree/master/extensions/2.0/Vendor/CESIUM_primitive_outline|CESIUM_primitive_outline} extension. This can be set false to avoid post-processing geometry at load time. When false, the showOutlines and outlineColor options are ignored.
@@ -3266,6 +3340,7 @@ function makeModelOptions(loader, modelType, options) {
     color: options.color,
     colorBlendAmount: options.colorBlendAmount,
     colorBlendMode: options.colorBlendMode,
+    edgeDisplayMode: options.edgeDisplayMode,
     silhouetteColor: options.silhouetteColor,
     silhouetteSize: options.silhouetteSize,
     enableShowOutline: options.enableShowOutline,
