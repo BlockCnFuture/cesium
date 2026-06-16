@@ -15,6 +15,7 @@ import PerspectiveFrustum from "../Core/PerspectiveFrustum.js";
 import PerspectiveOffCenterFrustum from "../Core/PerspectiveOffCenterFrustum.js";
 import Ray from "../Core/Ray.js";
 import ShowGeometryInstanceAttribute from "../Core/ShowGeometryInstanceAttribute.js";
+import Pass from "../Renderer/Pass.js";
 import Camera from "./Camera.js";
 import Cesium3DTileFeature from "./Cesium3DTileFeature.js";
 import Cesium3DTilePass from "./Cesium3DTilePass.js";
@@ -325,7 +326,51 @@ function pickBegin(
   passState = pickFramebuffer.begin(drawingBufferRectangle, viewport);
 
   scene.updateAndExecuteCommands(passState, scratchColorZero);
-  scene.resolveFramebuffers(passState);
+  scene.resolveFramebuffers(passState, () => {
+    executePickOverlay(scene, context, passState);
+  });
+}
+
+function executePickOverlay(scene, context, passState) {
+  if (!scene.enablePickOverlay) {
+    return;
+  }
+
+  const commandList = scene._overlayCommandList;
+  const length = commandList.length;
+  if (length === 0) {
+    return;
+  }
+
+  // Overlay should be pickable on top, so reset depth before drawing it.
+  scene._depthClearCommand.execute(context, passState);
+
+  const uniformState = context.uniformState;
+  uniformState.updatePass(Pass.OVERLAY);
+
+  const frameState = scene.frameState;
+  const pickingMetadata = frameState.pickingMetadata;
+  for (let i = 0; i < length; ++i) {
+    const command = commandList[i];
+    scene.updateDerivedCommands(command);
+
+    const derivedCommands = command.derivedCommands;
+    if (!defined(derivedCommands)) {
+      continue;
+    }
+
+    if (pickingMetadata && defined(derivedCommands.pickingMetadata)) {
+      derivedCommands.pickingMetadata.pickMetadataCommand.execute(
+        context,
+        passState,
+      );
+      continue;
+    }
+
+    if (defined(derivedCommands.picking)) {
+      derivedCommands.picking.pickCommand.execute(context, passState);
+    }
+  }
 }
 
 /**

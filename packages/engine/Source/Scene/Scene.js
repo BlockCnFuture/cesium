@@ -619,6 +619,14 @@ function Scene(options) {
    */
   this.postProcessStages = new PostProcessStageCollection();
 
+  /**
+   * Determines whether objects in the overlay layer are considered during picking.
+   * When enabled, an additional overlay pass is rendered for pick operations.
+   * @type {boolean}
+   * @default false
+   */
+  this.enablePickOverlay = false;
+
   this._brdfLutGenerator = new BrdfLutGenerator();
 
   this._performanceDisplay = undefined;
@@ -3907,7 +3915,7 @@ function updateAndClearFramebuffers(scene, passState, clearColor) {
 /**
  * @private
  */
-Scene.prototype.resolveFramebuffers = function (passState) {
+Scene.prototype.resolveFramebuffers = function (passState, callback) {
   const context = this._context;
   const environmentState = this._environmentState;
   const view = this._view;
@@ -3941,6 +3949,10 @@ Scene.prototype.resolveFramebuffers = function (passState) {
     translucentTileClassification.isSupported()
   ) {
     translucentTileClassification.execute(this, passState);
+  }
+
+  if (callback) {
+    callback();
   }
 
   if (usePostProcess) {
