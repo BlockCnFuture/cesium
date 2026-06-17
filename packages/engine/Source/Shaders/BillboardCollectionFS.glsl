@@ -133,19 +133,19 @@ void main()
         discard;
     }
 
-#ifndef DEPTH_FAIL_TRANSLUCENCY
     if (getDepthTestEnabled()) {
         vec2 fragSt = gl_FragCoord.xy / czm_viewport.zw;
         float eyeDepth = v_compressed.x;
         float globeDepth = getGlobeDepthAtCoords(fragSt);
         float distanceToEllipsoid = -v_splitDirectionAndEllipsoidDepthEC.y;
+        #ifndef DEPTH_FAIL_TRANSLUCENCY
         doDepthTest(eyeDepth, globeDepth);
+        #endif
 
         #ifdef LOG_DEPTH
         writeDepth(eyeDepth, globeDepth, distanceToEllipsoid);
         #endif
     }
-#endif
 
     vec4 color = texture(u_atlas, v_textureCoordinates);
 
