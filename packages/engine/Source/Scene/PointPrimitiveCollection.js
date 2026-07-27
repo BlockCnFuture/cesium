@@ -109,6 +109,7 @@ function PointPrimitiveCollection(options) {
       enabled: true,
       func: WebGLConstants.GREATER,
     },
+    depthMask: false,
     blending: BlendingState.ALPHA_BLEND,
   });
   this._allDepthFailTranslucencyNoValue = true;
