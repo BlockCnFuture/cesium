@@ -3100,10 +3100,34 @@ function executeComputeCommands(scene) {
  * @private
  */
 function executeOverlayCommands(scene, passState) {
-  scene.context.uniformState.updatePass(Pass.OVERLAY);
-
-  const context = scene.context;
   const commandList = scene._overlayCommandList;
+  if (commandList.length === 0) {
+    return;
+  }
+
+  const { camera, context } = scene;
+  const { uniformState } = context;
+
+  // executeCommands leaves the frustum uniforms set to the nearest multifrustum
+  // slice. Overlay commands are not binned into frustums, so 3D geometry rendered
+  // in the overlay pass (e.g. models with opaquePass: Pass.OVERLAY) would be
+  // clipped by that slice's near/far planes, most noticeably with orthographic
+  // cameras where log depth is disabled and multiple slices are common. Restore
+  // a frustum spanning the entire scene depth range before executing overlays.
+  const frustum = createWorkingFrustum(camera);
+  frustum.near = camera.frustum.near;
+  frustum.far = camera.frustum.far;
+  const frustumCommandsList = scene._view.frustumCommandsList;
+  const numFrustums = frustumCommandsList.length;
+  if (numFrustums > 0) {
+    // Tighter far plane than the camera's, for better depth precision. It is
+    // clamped to the camera's far plane in updateFrustums.
+    frustum.far = frustumCommandsList[numFrustums - 1].far;
+  }
+  uniformState.updateFrustum(frustum);
+
+  uniformState.updatePass(Pass.OVERLAY);
+
   for (let i = 0; i < commandList.length; ++i) {
     commandList[i].execute(context, passState);
   }
