@@ -157,6 +157,9 @@ function BillboardCollection(options) {
       enabled: true,
       func: WebGLConstants.GREATER,
     },
+    // Never write depth: occluded fragments passing the GREATER test would otherwise
+    // overwrite the (closer) occluder depth and block other depth-fail billboards.
+    depthMask: false,
     blending: BlendingState.ALPHA_BLEND,
   });
 
@@ -2294,7 +2297,10 @@ BillboardCollection.prototype.update = function (frameState) {
 
       commandList.push(command);
 
-      if (!this._allDepthFailTranslucencyNoValue) {
+      // With OPAQUE_AND_TRANSLUCENT the loop visits each vertex array twice
+      // (opaque then translucent command); only push the depth-fail command once.
+      const pushDepthFailCommand = !opaqueAndTranslucent || j % 2 === 1;
+      if (!this._allDepthFailTranslucencyNoValue && pushDepthFailCommand) {
         const depthFailShader =
           this._spTranslucentDepthFail ?? this._spDepthFail;
         if (depthFailShader) {

@@ -113,12 +113,17 @@ void writeDepth(float eyeDepth, float globeDepth, float distanceToEllipsoid) {
 
     float depthArg = v_depthFromNearPlusOne;
 
+// The depth-fail pass renders occluded fragments with a GREATER depth test, so the true
+// fragment depth must be used. Clamping it in front of the globe would make the GREATER
+// test fail and the occluded (translucent) parts would never be drawn.
+#ifndef DEPTH_FAIL_TRANSLUCENCY
     if (globeDepth != 0.0 && getRelativeEyeDepth(eyeDepth, distanceToEllipsoid, czm_epsilon3) > 0.0) {
         float globeDepthFromNearPlusOne = (-globeDepth - czm_currentFrustum.x) + 1.0;
         float nudge = max(globeDepthFromNearPlusOne * 5e-6, czm_epsilon7);
         float globeOnTop = max(1.0, globeDepthFromNearPlusOne - nudge);
         depthArg = min(depthArg, globeOnTop);
     }
+#endif
 
     czm_writeLogDepth(depthArg);
 }
