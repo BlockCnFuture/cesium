@@ -473,6 +473,18 @@ function FrameState(context, creditDisplay, jobScheduler) {
    * @private
    */
   this.edgeVisibilityRequested = false;
+
+  /**
+   * When true, globe drawing is stencil-suppressed where 3D Tiles will cover so
+   * terrain cannot occlude tiles while other geometry still depth-tests against
+   * both. Set from {@link Scene#prefer3dTiles}.
+   *
+   * @type {boolean}
+   * @default false
+   *
+   * @private
+   */
+  this.preferTilesDepth = false;
 }
 
 /**

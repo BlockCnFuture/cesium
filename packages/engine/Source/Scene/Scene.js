@@ -229,8 +229,15 @@ function Scene(options) {
       stencilMask: StencilConstants.CLASSIFICATION_MASK,
     }),
   });
+  this._nonTileStencilClearCommand = new ClearCommand({
+    stencil: 0,
+    renderState: RenderState.fromCache({
+      stencilMask: StencilConstants.NON_3D_TILE_MASK,
+    }),
+  });
 
   this._depthOnlyRenderStateCache = {};
+  this._tileFootprintRenderStateCache = {};
 
   this._transitioner = new SceneTransitioner(this);
 
@@ -392,6 +399,32 @@ function Scene(options) {
    * @default 1.0
    */
   this.verticalExaggeration = 1.0;
+
+  /**
+   * When <code>true</code>, 3D Tiles are never occluded by terrain, while other
+   * primitives keep normal depth testing against both terrain and 3D Tiles.
+   * <p>
+   * In 3D this keeps globe depth in the framebuffer (like enabling
+   * {@link Globe#depthTestAgainstTerrain}), stamps a cheap stencil footprint for
+   * 3D Tiles, suppresses globe shading in that footprint, then draws tiles with
+   * a normal depth test. {@link Scene#pickPosition} therefore returns terrain
+   * depth off tiles and 3D Tiles depth on tiles.
+   * </p>
+   * <p>
+   * This avoids the previous double-pass + stencil depth-merge approach that
+   * redrew the scene and forced MSAA stencil resolves for OIT.
+   * </p>
+   * <p>
+   * Known tradeoff: tiles may remain visible through terrain that would
+   * otherwise occlude them (for example a distant tileset behind a near hill),
+   * because terrain is treated as absent in the tile footprint. Disabled when
+   * the globe is translucent or the context has no stencil buffer.
+   * </p>
+   *
+   * @type {boolean}
+   * @default false
+   */
+  this.prefer3dTiles = false;
 
   /**
    * The reference height for vertical exaggeration of the scene.
@@ -655,6 +688,7 @@ function Scene(options) {
     clearGlobeDepth: false,
     useDepthPlane: false,
     renderTranslucentDepthForPick: false,
+    preferTilesDepth: false,
 
     originalFramebuffer: undefined,
     useGlobeDepthFramebuffer: false,
@@ -1799,6 +1833,16 @@ function updateDerivedCommands(scene, command, shadowsDirty) {
     );
   }
 
+  if (scene._environmentState.preferTilesDepth && command.pass === Pass.CESIUM_3D_TILE) {
+    derivedCommands.tileFootprint =
+      DerivedCommand.createTileFootprintDerivedCommand(
+        scene,
+        command,
+        context,
+        derivedCommands.tileFootprint,
+      );
+  }
+
   derivedCommands.originalCommand = command;
 
   if (scene._hdr) {
@@ -1881,6 +1925,12 @@ Scene.prototype.updateDerivedCommands = function (command) {
     needsHdrCommands ||
     needsDerivedCommands ||
     needsUpdateForMetadataPicking;
+
+  const preferTilesDepth = this._environmentState.preferTilesDepth;
+  if (preferTilesDepth && command.pass === Pass.CESIUM_3D_TILE && !defined(derivedCommands.tileFootprint)) {
+    // prefer3dTiles may be toggled on without other command dirtiness.
+    command.dirty = true;
+  }
 
   if (!command.dirty) {
     return;
@@ -2684,6 +2734,7 @@ function executeCommands(scene, passState) {
     useGlobeDepthFramebuffer,
     useInvertClassification,
     usePostProcessSelected,
+    preferTilesDepth,
   } = scene._environmentState;
 
   const {
@@ -2698,6 +2749,7 @@ function executeCommands(scene, passState) {
   const clearDepth = scene._depthClearCommand;
   const clearStencil = scene._stencilClearCommand;
   const clearClassificationStencil = scene._classificationStencilClearCommand;
+  const clearNonTileStencil = scene._nonTileStencilClearCommand;
   const depthPlane = scene._depthPlane;
 
   const height2D = camera.position.z;
@@ -2718,6 +2770,26 @@ function executeCommands(scene, passState) {
     const commandCount = frustumCommands.indices[passId];
     for (let j = 0; j < commandCount; ++j) {
       executeIdCommand(commands[j], scene, passState);
+    }
+  }
+
+  function performTileFootprintPass(frustumCommands) {
+    if (!preferTilesDepth) {
+      return;
+    }
+
+    uniformState.updatePass(Pass.CESIUM_3D_TILE);
+    const commands = frustumCommands.commands[Pass.CESIUM_3D_TILE];
+    const commandCount = frustumCommands.indices[Pass.CESIUM_3D_TILE];
+    for (let j = 0; j < commandCount; ++j) {
+      let command = commands[j];
+      if (frameState.useLogDepth && defined(command.derivedCommands) && defined(command.derivedCommands.logDepth)) {
+        command = command.derivedCommands.logDepth.command;
+      }
+      const footprint = command.derivedCommands?.tileFootprint?.tileFootprintCommand;
+      if (defined(footprint)) {
+        footprint.execute(context, passState);
+      }
     }
   }
 
@@ -2746,7 +2818,16 @@ function executeCommands(scene, passState) {
 
     clearDepth.execute(context, passState);
 
-    if (context.stencilBuffer) {
+    if (preferTilesDepth) {
+      // Keep CESIUM_3D_TILE_MASK across nearer frustums so far tiles continue to
+      // suppress nearer globe shading (global tiles-over-terrain priority).
+      if (i === 0) {
+        clearStencil.execute(context, passState);
+      } else {
+        clearNonTileStencil.execute(context, passState);
+      }
+      performTileFootprintPass(frustumCommands);
+    } else if (context.stencilBuffer) {
       clearStencil.execute(context, passState);
     }
 
@@ -2841,12 +2922,19 @@ function executeCommands(scene, passState) {
 
       if (commandCount > 0) {
         if (useGlobeDepthFramebuffer) {
-          globeDepth.prepareColorTextures(context, clearGlobeDepth);
-          globeDepth.executeUpdateDepth(
-            context,
-            passState,
-            globeDepth.depthStencilTexture,
-          );
+          if (preferTilesDepth) {
+            // Main depth already equals the merged visible surface; a plain copy
+            // is enough and avoids the stencil-merge update path.
+            globeDepth.prepareColorTextures(context);
+            globeDepth.executeCopyDepth(context, passState);
+          } else {
+            globeDepth.prepareColorTextures(context, clearGlobeDepth);
+            globeDepth.executeUpdateDepth(
+              context,
+              passState,
+              globeDepth.depthStencilTexture,
+            );
+          }
         }
 
         // Draw classifications. Modifies 3D Tiles color.
@@ -2935,7 +3023,11 @@ function executeCommands(scene, passState) {
     }
 
     if (commandCount > 0 && context.stencilBuffer) {
-      clearStencil.execute(context, passState);
+      if (preferTilesDepth) {
+        clearNonTileStencil.execute(context, passState);
+      } else {
+        clearStencil.execute(context, passState);
+      }
     }
 
     performVoxelsPass(scene, passState, frustumCommands);
@@ -3618,14 +3710,27 @@ Scene.prototype.updateEnvironment = function () {
       : undefined;
   }
 
+  // prefer3dTiles keeps terrain depth in the framebuffer so other geometry can
+  // depth-test against the globe. Tile footprints are stencil-marked first so the
+  // globe can be suppressed there; clearing globe depth would drop terrain
+  // occlusion for points/polylines/models.
   const clearGlobeDepth = (environmentState.clearGlobeDepth =
     defined(globe) &&
     globe.show &&
-    (!globe.depthTestAgainstTerrain || this.mode === SceneMode.SCENE2D));
+    (!globe.depthTestAgainstTerrain || this.mode === SceneMode.SCENE2D) &&
+    !(this.prefer3dTiles && this.mode === SceneMode.SCENE3D));
   const useDepthPlane = (environmentState.useDepthPlane =
     clearGlobeDepth &&
     this.mode === SceneMode.SCENE3D &&
     globeTranslucencyState.useDepthPlane);
+  const preferTilesDepth = (environmentState.preferTilesDepth =
+    this.prefer3dTiles &&
+    this.mode === SceneMode.SCENE3D &&
+    this.context.stencilBuffer &&
+    defined(globe) &&
+    globe.show &&
+    !globeTranslucencyState.translucent);
+  this._frameState.preferTilesDepth = preferTilesDepth;
   if (useDepthPlane) {
     // Update the depth plane that is rendered in 3D when the primitives are
     // not depth tested against terrain so primitives on the backface

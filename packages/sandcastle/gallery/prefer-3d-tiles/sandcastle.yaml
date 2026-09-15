@@ -1,0 +1,7 @@
+title: Prefer 3D Tiles Depth
+description: Keep 3D Tiles visible through terrain with prefer3dTiles, while polylines still depth-test against both terrain and tiles.
+labels:
+  - 3D Tiles
+  - Terrain
+  - Showcases
+thumbnail: thumbnail.jpg

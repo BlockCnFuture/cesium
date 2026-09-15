@@ -5,6 +5,9 @@ import RenderState from "../Renderer/RenderState.js";
 import ShaderSource from "../Renderer/ShaderSource.js";
 import MetadataType from "./MetadataType.js";
 import MetadataPickingPipelineStage from "./Model/MetadataPickingPipelineStage.js";
+import StencilConstants from "./StencilConstants.js";
+import StencilFunction from "./StencilFunction.js";
+import StencilOperation from "./StencilOperation.js";
 
 /**
  * @private
@@ -128,6 +131,85 @@ DerivedCommand.createDepthOnlyDerivedCommand = function (
   } else {
     result.depthOnlyCommand.shaderProgram = shader;
     result.depthOnlyCommand.renderState = renderState;
+  }
+
+  return result;
+};
+
+function getTileFootprintRenderState(scene, renderState) {
+  const cache = scene._tileFootprintRenderStateCache;
+
+  const cachedState = cache[renderState.id];
+  if (defined(cachedState)) {
+    return cachedState;
+  }
+
+  const rs = RenderState.getState(renderState);
+  rs.depthMask = false;
+  rs.colorMask = {
+    red: false,
+    green: false,
+    blue: false,
+    alpha: false,
+  };
+  rs.stencilTest = {
+    enabled: true,
+    frontFunction: StencilFunction.ALWAYS,
+    frontOperation: {
+      fail: StencilOperation.KEEP,
+      zFail: StencilOperation.KEEP,
+      zPass: StencilOperation.REPLACE,
+    },
+    backFunction: StencilFunction.ALWAYS,
+    backOperation: {
+      fail: StencilOperation.KEEP,
+      zFail: StencilOperation.KEEP,
+      zPass: StencilOperation.REPLACE,
+    },
+    reference: StencilConstants.CESIUM_3D_TILE_MASK,
+    mask: StencilConstants.CESIUM_3D_TILE_MASK,
+  };
+  // Do not clobber classification / skip-LOD bits written by other passes.
+  rs.stencilMask = StencilConstants.CESIUM_3D_TILE_MASK;
+
+  const footprintState = RenderState.fromCache(rs);
+  cache[renderState.id] = footprintState;
+  return footprintState;
+}
+
+/**
+ * Creates a color/depth-inert command that only stamps the 3D Tiles stencil bit
+ * where the tile would pass the normal depth test. Used by prefer3dTiles to
+ * suppress globe shading in tile footprints before the globe pass.
+ *
+ * @private
+ */
+DerivedCommand.createTileFootprintDerivedCommand = function (scene, command, context, result) {
+  if (!defined(result)) {
+    result = {};
+  }
+
+  const shader = result.tileFootprintCommand?.shaderProgram;
+  const renderState = result.tileFootprintCommand?.renderState;
+
+  result.tileFootprintCommand = DrawCommand.shallowClone(
+    command,
+    result.tileFootprintCommand,
+  );
+
+  if (!defined(shader) || result.shaderProgramId !== command.shaderProgram.id) {
+    result.tileFootprintCommand.shaderProgram = getDepthOnlyShaderProgram(
+      context,
+      command.shaderProgram,
+    );
+    result.tileFootprintCommand.renderState = getTileFootprintRenderState(
+      scene,
+      command.renderState,
+    );
+    result.shaderProgramId = command.shaderProgram.id;
+  } else {
+    result.tileFootprintCommand.shaderProgram = shader;
+    result.tileFootprintCommand.renderState = renderState;
   }
 
   return result;

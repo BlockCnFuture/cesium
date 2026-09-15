@@ -40,6 +40,7 @@ import ClippingPlaneCollection from "./ClippingPlaneCollection.js";
 import ClippingPolygonCollection from "./ClippingPolygonCollection.js";
 import DepthFunction from "./DepthFunction.js";
 import GlobeSurfaceTile from "./GlobeSurfaceTile.js";
+import StencilConstants from "./StencilConstants.js";
 import ImageryLayer from "./ImageryLayer.js";
 import ImageryState from "./ImageryState.js";
 import PerInstanceColorAppearance from "./PerInstanceColorAppearance.js";
@@ -125,6 +126,10 @@ function GlobeSurfaceTileProvider(options) {
   this._blendRenderState = undefined;
   this._disableCullingRenderState = undefined;
   this._disableCullingBlendRenderState = undefined;
+  this._preferTilesRenderState = undefined;
+  this._preferTilesBlendRenderState = undefined;
+  this._preferTilesDisableCullingRenderState = undefined;
+  this._preferTilesDisableCullingBlendRenderState = undefined;
 
   this._errorEvent = new Event();
 
@@ -472,6 +477,24 @@ GlobeSurfaceTileProvider.prototype.endUpdate = function (frameState) {
     rs = clone(this._blendRenderState, true);
     rs.cull.enabled = false;
     this._disableCullingBlendRenderState = RenderState.fromCache(rs);
+
+    const excludeTiles = StencilConstants.excludeCesium3DTileBit();
+
+    rs = clone(this._renderState, true);
+    rs.stencilTest = excludeTiles;
+    this._preferTilesRenderState = RenderState.fromCache(rs);
+
+    rs = clone(this._blendRenderState, true);
+    rs.stencilTest = excludeTiles;
+    this._preferTilesBlendRenderState = RenderState.fromCache(rs);
+
+    rs = clone(this._disableCullingRenderState, true);
+    rs.stencilTest = excludeTiles;
+    this._preferTilesDisableCullingRenderState = RenderState.fromCache(rs);
+
+    rs = clone(this._disableCullingBlendRenderState, true);
+    rs.stencilTest = excludeTiles;
+    this._preferTilesDisableCullingBlendRenderState = RenderState.fromCache(rs);
   }
 
   // If this frame has a mix of loaded and fill tiles, we need to propagate
@@ -2370,12 +2393,24 @@ function addDrawCommandsForTile(tileProvider, tile, frameState) {
     tileProvider.showSkirts && !cameraUnderground && !translucent;
   const backFaceCulling =
     tileProvider.backFaceCulling && !cameraUnderground && !translucent;
-  const firstPassRenderState = backFaceCulling
-    ? tileProvider._renderState
-    : tileProvider._disableCullingRenderState;
-  const otherPassesRenderState = backFaceCulling
-    ? tileProvider._blendRenderState
-    : tileProvider._disableCullingBlendRenderState;
+  const preferTilesDepth = frameState.preferTilesDepth;
+  let firstPassRenderState;
+  let otherPassesRenderState;
+  if (preferTilesDepth) {
+    firstPassRenderState = backFaceCulling
+      ? tileProvider._preferTilesRenderState
+      : tileProvider._preferTilesDisableCullingRenderState;
+    otherPassesRenderState = backFaceCulling
+      ? tileProvider._preferTilesBlendRenderState
+      : tileProvider._preferTilesDisableCullingBlendRenderState;
+  } else {
+    firstPassRenderState = backFaceCulling
+      ? tileProvider._renderState
+      : tileProvider._disableCullingRenderState;
+    otherPassesRenderState = backFaceCulling
+      ? tileProvider._blendRenderState
+      : tileProvider._disableCullingBlendRenderState;
+  }
   let renderState = firstPassRenderState;
 
   let initialColor = tileProvider._firstPassInitialColor;
