@@ -30,6 +30,7 @@ import OrthographicFrustum from "../Core/OrthographicFrustum.js";
 import OrthographicOffCenterFrustum from "../Core/OrthographicOffCenterFrustum.js";
 import PerspectiveFrustum from "../Core/PerspectiveFrustum.js";
 import PerspectiveOffCenterFrustum from "../Core/PerspectiveOffCenterFrustum.js";
+import PrimitiveType from "../Core/PrimitiveType.js";
 import Rectangle from "../Core/Rectangle.js";
 import RequestScheduler from "../Core/RequestScheduler.js";
 import TaskProcessor from "../Core/TaskProcessor.js";
@@ -60,6 +61,7 @@ import MapMode2D from "./MapMode2D.js";
 import PerformanceDisplay from "./PerformanceDisplay.js";
 import PerInstanceColorAppearance from "./PerInstanceColorAppearance.js";
 import Picking from "./Picking.js";
+import PointCloudEyeDomeLighting from "./PointCloudEyeDomeLighting.js";
 import PostProcessStageCollection from "./PostProcessStageCollection.js";
 import Primitive from "./Primitive.js";
 import PrimitiveCollection from "./PrimitiveCollection.js";
@@ -405,10 +407,13 @@ function Scene(options) {
    * primitives keep normal depth testing against both terrain and 3D Tiles.
    * <p>
    * In 3D this keeps globe depth in the framebuffer (like enabling
-   * {@link Globe#depthTestAgainstTerrain}), stamps a cheap stencil footprint for
-   * 3D Tiles, suppresses globe shading in that footprint, then draws tiles with
-   * a normal depth test. {@link Scene#pickPosition} therefore returns terrain
-   * depth off tiles and 3D Tiles depth on tiles.
+   * {@link Globe#depthTestAgainstTerrain}), stamps coverage before the globe so
+   * terrain does not write depth under tiles, then draws tiles with a normal
+   * depth test. Triangle meshes stamp a geometry stencil footprint. Opaque
+   * point clouds are drawn once before the globe (writing the tiles stencil
+   * bit); with eye-dome lighting the early draw fills the EDL G-buffer and a
+   * fullscreen G-buffer pass stamps stencil. {@link Scene#pickPosition}
+   * returns terrain depth off tiles and 3D Tiles depth on tile pixels.
    * </p>
    * <p>
    * This avoids the previous double-pass + stencil depth-merge approach that
@@ -1796,6 +1801,43 @@ function pickedMetadataInfoChanged(command, frameState) {
   return false;
 }
 
+/**
+ * True when a draw command writes the Cesium 3D Tiles stencil classification bit.
+ * Used to detect translucent tile point clouds that are not in Pass.CESIUM_3D_TILE.
+ * @private
+ */
+function isCesium3DTileStencilCommand(command) {
+  const stencilMask = command.renderState?.stencilMask;
+  return (
+    defined(stencilMask) &&
+    (stencilMask & StencilConstants.CESIUM_3D_TILE_MASK) ===
+      StencilConstants.CESIUM_3D_TILE_MASK
+  );
+}
+
+function needsTileFootprintDerivedCommand(command) {
+  // EDL blend/clear/stencil quads — never geometry-footprint them.
+  if (command.owner instanceof PointCloudEyeDomeLighting) {
+    return false;
+  }
+  // Opaque point clouds (EDL or not) are drawn once before the globe and write
+  // the tiles stencil bit themselves — no separate geometry footprint.
+  if (
+    command.pass === Pass.CESIUM_3D_TILE &&
+    command.primitiveType === PrimitiveType.POINTS
+  ) {
+    return false;
+  }
+  if (command.pass === Pass.CESIUM_3D_TILE) {
+    return true;
+  }
+  return (
+    command.pass === Pass.TRANSLUCENT &&
+    command.primitiveType === PrimitiveType.POINTS &&
+    isCesium3DTileStencilCommand(command)
+  );
+}
+
 function updateDerivedCommands(scene, command, shadowsDirty) {
   const frameState = scene._frameState;
   const context = scene._context;
@@ -1833,9 +1875,9 @@ function updateDerivedCommands(scene, command, shadowsDirty) {
     );
   }
 
-  if (scene._environmentState.preferTilesDepth && command.pass === Pass.CESIUM_3D_TILE) {
-    derivedCommands.tileFootprint =
-      DerivedCommand.createTileFootprintDerivedCommand(
+  if (scene._environmentState.preferTilesDepth && needsTileFootprintDerivedCommand(command)) {
+    // Per-fragment stencil footprint (triangle pixel or point sprite).
+    derivedCommands.tileFootprint = DerivedCommand.createTileFootprintDerivedCommand(
         scene,
         command,
         context,
@@ -1927,9 +1969,14 @@ Scene.prototype.updateDerivedCommands = function (command) {
     needsUpdateForMetadataPicking;
 
   const preferTilesDepth = this._environmentState.preferTilesDepth;
-  if (preferTilesDepth && command.pass === Pass.CESIUM_3D_TILE && !defined(derivedCommands.tileFootprint)) {
+  if (preferTilesDepth && needsTileFootprintDerivedCommand(command)) {
     // prefer3dTiles may be toggled on without other command dirtiness.
-    command.dirty = true;
+    // Footprint derived state lives on the log-depth command when log depth is on.
+    const logCommand = derivedCommands.logDepth?.command;
+    const hasFootprint = defined(derivedCommands.tileFootprint) || defined(logCommand?.derivedCommands?.tileFootprint);
+    if (!hasFootprint) {
+      command.dirty = true;
+    }
   }
 
   if (!command.dirty) {
@@ -2285,7 +2332,7 @@ function executeCommand(command, scene, passState, debugFramebuffer) {
     debugShowBoundingVolume(command, scene, passState, debugFramebuffer);
   }
 
-  if (frameState.useLogDepth && defined(command.derivedCommands.logDepth)) {
+  if (frameState.useLogDepth && defined(command.derivedCommands) && defined(command.derivedCommands.logDepth)) {
     command = command.derivedCommands.logDepth.command;
   }
 
@@ -2773,7 +2820,59 @@ function executeCommands(scene, passState) {
     }
   }
 
+  function executeGeometryFootprint(command) {
+    if (command.owner instanceof PointCloudEyeDomeLighting) {
+      return false;
+    }
+
+    let footprintCommand = command;
+    if (frameState.useLogDepth && defined(command.derivedCommands) && defined(command.derivedCommands.logDepth)) {
+      footprintCommand = command.derivedCommands.logDepth.command;
+    }
+    const footprint =
+      footprintCommand.derivedCommands?.tileFootprint?.tileFootprintCommand;
+    if (defined(footprint)) {
+      footprint.framebuffer = undefined;
+      footprint.execute(context, passState);
+      return true;
+    }
+    return false;
+  }
+
   function performTileFootprintPass(frustumCommands) {
+    if (!preferTilesDepth) {
+      return;
+    }
+
+    // Triangle meshes (and translucent point clouds below): geometry stencil.
+    // Opaque POINTS are handled in performPreferTilesPointsBeforeGlobe.
+    uniformState.updatePass(Pass.CESIUM_3D_TILE);
+    let commands = frustumCommands.commands[Pass.CESIUM_3D_TILE];
+    let commandCount = frustumCommands.indices[Pass.CESIUM_3D_TILE];
+    for (let j = 0; j < commandCount; ++j) {
+      executeGeometryFootprint(commands[j]);
+    }
+
+    commands = frustumCommands.commands[Pass.TRANSLUCENT];
+    commandCount = frustumCommands.indices[Pass.TRANSLUCENT];
+    for (let j = 0; j < commandCount; ++j) {
+      const command = commands[j];
+      if (
+        command.primitiveType === PrimitiveType.POINTS &&
+        isCesium3DTileStencilCommand(command)
+      ) {
+        executeGeometryFootprint(command);
+      }
+    }
+  }
+
+  /**
+   * Draw opaque point clouds once before the globe (depth was just cleared).
+   * Non-EDL points write color/depth/stencil on the main FB. EDL points fill
+   * the offscreen G-buffer, then a cheap fullscreen pass stamps stencil.
+   * Skipped again in performCesium3DTilePass so the cloud is not drawn twice.
+   */
+  function performPreferTilesPointsBeforeGlobe(frustumCommands) {
     if (!preferTilesDepth) {
       return;
     }
@@ -2781,16 +2880,38 @@ function executeCommands(scene, passState) {
     uniformState.updatePass(Pass.CESIUM_3D_TILE);
     const commands = frustumCommands.commands[Pass.CESIUM_3D_TILE];
     const commandCount = frustumCommands.indices[Pass.CESIUM_3D_TILE];
+    const processors = [];
+
     for (let j = 0; j < commandCount; ++j) {
-      let command = commands[j];
-      if (frameState.useLogDepth && defined(command.derivedCommands) && defined(command.derivedCommands.logDepth)) {
-        command = command.derivedCommands.logDepth.command;
-      }
-      const footprint = command.derivedCommands?.tileFootprint?.tileFootprintCommand;
-      if (defined(footprint)) {
-        footprint.execute(context, passState);
+      const command = commands[j];
+      if (command.primitiveType === PrimitiveType.POINTS) {
+        executeCommand(command, scene, passState);
+      } else if (command.owner instanceof PointCloudEyeDomeLighting && processors.indexOf(command.owner) === -1) {
+        processors.push(command.owner);
       }
     }
+
+    for (let p = 0; p < processors.length; ++p) {
+      processors[p].executeStencilFootprint(context, passState);
+    }
+  }
+
+  function performCesium3DTilePass(frustumCommands) {
+    uniformState.updatePass(Pass.CESIUM_3D_TILE);
+    const commands = frustumCommands.commands[Pass.CESIUM_3D_TILE];
+    const commandCount = frustumCommands.indices[Pass.CESIUM_3D_TILE];
+    let executed = 0;
+    for (let j = 0; j < commandCount; ++j) {
+      const command = commands[j];
+      // Opaque points already drew before the globe when preferTilesDepth.
+      if (preferTilesDepth && command.primitiveType === PrimitiveType.POINTS) {
+        ++executed;
+        continue;
+      }
+      executeCommand(command, scene, passState);
+      ++executed;
+    }
+    return executed;
   }
 
   // Execute commands in each frustum in back to front order
@@ -2827,6 +2948,7 @@ function executeCommands(scene, passState) {
         clearNonTileStencil.execute(context, passState);
       }
       performTileFootprintPass(frustumCommands);
+      performPreferTilesPointsBeforeGlobe(frustumCommands);
     } else if (context.stencilBuffer) {
       clearStencil.execute(context, passState);
     }
@@ -2917,8 +3039,8 @@ function executeCommands(scene, passState) {
     if (!useInvertClassification || picking || renderTranslucentDepthForPick) {
       // Common/fastest path. Draw 3D Tiles and classification normally.
 
-      // Draw 3D Tiles
-      commandCount = performPass(frustumCommands, Pass.CESIUM_3D_TILE);
+      // Draw 3D Tiles (EDL points already filled G-buffer when preferTilesDepth)
+      commandCount = performCesium3DTilePass(frustumCommands);
 
       if (commandCount > 0) {
         if (useGlobeDepthFramebuffer) {
@@ -2983,8 +3105,8 @@ function executeCommands(scene, passState) {
       const opaqueClassificationFramebuffer = passState.framebuffer;
       passState.framebuffer = scene._invertClassification._fbo.framebuffer;
 
-      // Draw normally
-      commandCount = performPass(frustumCommands, Pass.CESIUM_3D_TILE);
+      // Draw normally (EDL points already filled G-buffer when preferTilesDepth)
+      commandCount = performCesium3DTilePass(frustumCommands);
 
       if (useGlobeDepthFramebuffer) {
         scene._invertClassification.prepareTextures(context);

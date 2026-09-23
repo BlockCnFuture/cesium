@@ -11,6 +11,8 @@ import RenderState from "../Renderer/RenderState.js";
 import ShaderSource from "../Renderer/ShaderSource.js";
 import BlendingState from "../Scene/BlendingState.js";
 import StencilConstants from "../Scene/StencilConstants.js";
+import StencilFunction from "../Scene/StencilFunction.js";
+import StencilOperation from "../Scene/StencilOperation.js";
 import PointCloudEyeDomeLightingShader from "../Shaders/PostProcessStages/PointCloudEyeDomeLighting.js";
 
 /**
@@ -28,9 +30,11 @@ function PointCloudEyeDomeLighting() {
 
   this._drawCommand = undefined;
   this._clearCommand = undefined;
+  this._stencilCommand = undefined;
 
   this._strength = 1.0;
   this._radius = 1.0;
+  this._preferTilesDepth = false;
 }
 
 Object.defineProperties(PointCloudEyeDomeLighting.prototype, {
@@ -55,17 +59,32 @@ function destroyFramebuffer(processor) {
   processor._framebuffer.destroy();
   processor._drawCommand = undefined;
   processor._clearCommand = undefined;
+  processor._stencilCommand = undefined;
 }
 
 const distanceAndEdlStrengthScratch = new Cartesian2();
 
-function createCommands(processor, context) {
+const preferTilesStencilFS = `uniform sampler2D u_pointCloud_colorGBuffer;
+uniform sampler2D u_pointCloud_depthGBuffer;
+in vec2 v_textureCoordinates;
+void main()
+{
+    float depthOrLogDepth = czm_unpackDepth(texture(u_pointCloud_depthGBuffer, v_textureCoordinates));
+    vec4 color = texture(u_pointCloud_colorGBuffer, v_textureCoordinates);
+    if (depthOrLogDepth == 0.0 || color.a == 0.0) {
+        discard;
+    }
+    out_FragColor = vec4(1.0);
+}
+`;
+
+function createCommands(processor, context, preferTilesDepth) {
   const blendFS = new ShaderSource({
     defines: ["LOG_DEPTH_WRITE"],
     sources: [PointCloudEyeDomeLightingShader],
   });
 
-  const blendUniformMap = {
+  const gBufferUniformMap = {
     u_pointCloud_colorGBuffer: function () {
       return processor.colorGBuffer;
     },
@@ -90,7 +109,7 @@ function createCommands(processor, context) {
   });
 
   processor._drawCommand = context.createViewportQuadCommand(blendFS, {
-    uniformMap: blendUniformMap,
+    uniformMap: gBufferUniformMap,
     renderState: blendRenderState,
     pass: Pass.CESIUM_3D_TILE,
     owner: processor,
@@ -104,13 +123,74 @@ function createCommands(processor, context) {
     pass: Pass.CESIUM_3D_TILE,
     owner: processor,
   });
+
+  // Cheap fullscreen stencil from the EDL G-buffer (prefer3dTiles). Replaces
+  // re-drawing every point for a geometry footprint.
+  const stencilRenderState = RenderState.fromCache({
+    colorMask: {
+      red: false,
+      green: false,
+      blue: false,
+      alpha: false,
+    },
+    depthMask: false,
+    depthTest: {
+      enabled: false,
+    },
+    stencilTest: {
+      enabled: true,
+      frontFunction: StencilFunction.ALWAYS,
+      frontOperation: {
+        fail: StencilOperation.KEEP,
+        zFail: StencilOperation.KEEP,
+        zPass: StencilOperation.REPLACE,
+      },
+      backFunction: StencilFunction.ALWAYS,
+      backOperation: {
+        fail: StencilOperation.KEEP,
+        zFail: StencilOperation.KEEP,
+        zPass: StencilOperation.REPLACE,
+      },
+      reference: StencilConstants.CESIUM_3D_TILE_MASK,
+      mask: StencilConstants.CESIUM_3D_TILE_MASK,
+    },
+    stencilMask: StencilConstants.CESIUM_3D_TILE_MASK,
+  });
+
+  processor._stencilCommand = context.createViewportQuadCommand(
+    new ShaderSource({
+      sources: [preferTilesStencilFS],
+    }),
+    {
+      uniformMap: gBufferUniformMap,
+      renderState: stencilRenderState,
+      pass: Pass.CESIUM_3D_TILE,
+      owner: processor,
+    },
+  );
+
+  // Accumulate points across frustums; composite/clear once in the nearest.
+  processor._drawCommand.executeInClosestFrustum = preferTilesDepth;
+  processor._clearCommand.executeInClosestFrustum = preferTilesDepth;
+
+  processor._preferTilesDepth = preferTilesDepth;
 }
 
-function createResources(processor, context) {
+function createResources(processor, context, preferTilesDepth) {
   const width = context.drawingBufferWidth;
   const height = context.drawingBufferHeight;
+  const needsRebuild =
+    !defined(processor._drawCommand) ||
+    processor._preferTilesDepth !== preferTilesDepth ||
+    processor._framebuffer.isDirty(width, height);
+
   processor._framebuffer.update(context, width, height);
-  createCommands(processor, context);
+
+  if (needsRebuild) {
+    createCommands(processor, context, preferTilesDepth);
+  } else {
+    processor._clearCommand.framebuffer = processor.framebuffer;
+  }
 }
 
 function isSupported(context) {
@@ -168,6 +248,17 @@ function getECShaderProgram(context, shaderProgram) {
   return shader;
 }
 
+/**
+ * Stamp CESIUM_3D_TILE_MASK on the main framebuffer where the EDL G-buffer has
+ * points. Used by prefer3dTiles before the globe pass.
+ * @private
+ */
+PointCloudEyeDomeLighting.prototype.executeStencilFootprint = function (context, passState) {
+  if (defined(this._stencilCommand)) {
+    this._stencilCommand.execute(context, passState);
+  }
+};
+
 PointCloudEyeDomeLighting.prototype.update = function (
   frameState,
   commandStart,
@@ -182,7 +273,8 @@ PointCloudEyeDomeLighting.prototype.update = function (
   this._radius =
     pointCloudShading.eyeDomeLightingRadius * frameState.pixelRatio;
 
-  createResources(this, frameState.context);
+  const preferTilesDepth = frameState.preferTilesDepth === true;
+  createResources(this, frameState.context, preferTilesDepth);
 
   // Hijack existing point commands to render into an offscreen FBO.
   let i;

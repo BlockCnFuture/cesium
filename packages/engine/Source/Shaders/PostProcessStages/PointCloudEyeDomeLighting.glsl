@@ -26,19 +26,21 @@ vec2 neighborContribution(float log2Depth, vec2 offset)
 
 void main()
 {
+    vec4 color = texture(u_pointCloud_colorGBuffer, v_textureCoordinates);
     float depthOrLogDepth = czm_unpackDepth(texture(u_pointCloud_depthGBuffer, v_textureCoordinates));
+
+    // Cleared G-buffer is (0,0,0,0) with unpacked depth 0. Reject empty pixels
+    // before any math so prefer3dTiles + depthFunc ALWAYS cannot stamp stencil /
+    // depth across the whole screen (seen as a black scene in orthographic).
+    if (depthOrLogDepth == 0.0 || color.a == 0.0)
+    {
+        discard;
+    }
 
     vec4 eyeCoordinate = czm_windowToEyeCoordinates(gl_FragCoord.xy, depthOrLogDepth);
     eyeCoordinate /= eyeCoordinate.w;
 
     float log2Depth = log2(-eyeCoordinate.z);
-
-    if (depthOrLogDepth == 0.0) // 0.0 is the clear value for the gbuffer
-    {
-        discard;
-    }
-
-    vec4 color = texture(u_pointCloud_colorGBuffer, v_textureCoordinates);
 
     // sample from neighbors left, right, down, up
     vec2 texelSize = 1.0 / czm_viewport.zw;
@@ -50,10 +52,12 @@ void main()
     responseAndCount += neighborContribution(log2Depth, vec2(0.0, -texelSize.y));
     responseAndCount += neighborContribution(log2Depth, vec2(0.0, +texelSize.y));
 
-    float response = responseAndCount.x / responseAndCount.y;
-    float strength = u_distanceAndEdlStrength.y;
-    float shade = exp(-response * 300.0 * strength);
-    color.rgb *= shade;
+    if (responseAndCount.y > 0.0) {
+        float response = responseAndCount.x / responseAndCount.y;
+        float strength = u_distanceAndEdlStrength.y;
+        float shade = exp(-response * 300.0 * strength);
+        color.rgb *= shade;
+    }
     out_FragColor = vec4(color);
 
     // Input and output depth are the same.

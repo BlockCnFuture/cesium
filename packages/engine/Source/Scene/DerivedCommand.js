@@ -178,9 +178,63 @@ function getTileFootprintRenderState(scene, renderState) {
 }
 
 /**
+ * Pass-through FS for prefer3dTiles footprints. Keeps the original VS so POINTS
+ * retain attenuation / gl_PointSize. Intentionally ignores discard in the source
+ * FS so every rasterized fragment stamps stencil.
+ *
+ * @private
+ */
+function getTileFootprintShaderProgram(context, shaderProgram) {
+  const cachedShader = context.shaderCache.getDerivedShaderProgram(
+    shaderProgram,
+    "tileFootprint",
+  );
+  if (defined(cachedShader)) {
+    return cachedShader;
+  }
+
+  const usesLogDepth =
+    shaderProgram.fragmentShaderSource.defines.indexOf("LOG_DEPTH") >= 0 ||
+    shaderProgram.vertexShaderSource.defines.indexOf("LOG_DEPTH") >= 0;
+
+  const source = usesLogDepth
+    ? `void main()
+{
+    out_FragColor = vec4(1.0);
+    czm_writeLogDepth();
+}
+`
+    : `void main()
+{
+    out_FragColor = vec4(1.0);
+}
+`;
+
+  const fs = new ShaderSource({
+    defines: usesLogDepth ? ["LOG_DEPTH"] : [],
+    sources: [source],
+  });
+
+  return context.shaderCache.createDerivedShaderProgram(
+    shaderProgram,
+    "tileFootprint",
+    {
+      vertexShaderSource: shaderProgram.vertexShaderSource,
+      fragmentShaderSource: fs,
+      attributeLocations: shaderProgram._attributeLocations,
+    },
+  );
+}
+
+/**
  * Creates a color/depth-inert command that only stamps the 3D Tiles stencil bit
  * where the tile would pass the normal depth test. Used by prefer3dTiles to
  * suppress globe shading in tile footprints before the globe pass.
+ * <p>
+ * Works for triangle meshes and point clouds (one stencil sample per point
+ * sprite). Always targets the main framebuffer so eye-dome-lighting offscreen
+ * point draws still mark the globe correctly.
+ * </p>
  *
  * @private
  */
@@ -196,9 +250,11 @@ DerivedCommand.createTileFootprintDerivedCommand = function (scene, command, con
     command,
     result.tileFootprintCommand,
   );
+  // Never inherit an offscreen FBO (e.g. EDL point draws).
+  result.tileFootprintCommand.framebuffer = undefined;
 
   if (!defined(shader) || result.shaderProgramId !== command.shaderProgram.id) {
-    result.tileFootprintCommand.shaderProgram = getDepthOnlyShaderProgram(
+    result.tileFootprintCommand.shaderProgram = getTileFootprintShaderProgram(
       context,
       command.shaderProgram,
     );
