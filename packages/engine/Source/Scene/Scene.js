@@ -1803,15 +1803,36 @@ function pickedMetadataInfoChanged(command, frameState) {
 
 /**
  * True when a draw command writes the Cesium 3D Tiles stencil classification bit.
- * Used to detect translucent tile point clouds that are not in Pass.CESIUM_3D_TILE.
+ * Used to detect 3D Tiles point clouds (opaque or translucent).
+ * <p>
+ * Must require <code>stencilTest.enabled</code>: the default
+ * <code>stencilMask</code> is <code>~0</code>, so a mask-only check would
+ * falsely match {@link PointPrimitiveCollection} and other non-tile POINTS.
+ * </p>
  * @private
  */
 function isCesium3DTileStencilCommand(command) {
-  const stencilMask = command.renderState?.stencilMask;
+  const rs = command.renderState;
+  const stencilTest = rs?.stencilTest;
+  if (!defined(stencilTest) || !stencilTest.enabled) {
+    return false;
+  }
   return (
-    defined(stencilMask) &&
-    (stencilMask & StencilConstants.CESIUM_3D_TILE_MASK) ===
+    (rs.stencilMask & StencilConstants.CESIUM_3D_TILE_MASK) ===
+      StencilConstants.CESIUM_3D_TILE_MASK &&
+    (stencilTest.reference & StencilConstants.CESIUM_3D_TILE_MASK) ===
       StencilConstants.CESIUM_3D_TILE_MASK
+  );
+}
+
+/**
+ * prefer3dTiles early-draw / skip path: only real 3D Tiles point clouds.
+ * @private
+ */
+function isPreferTilesPointCloudCommand(command) {
+  return (
+    command.primitiveType === PrimitiveType.POINTS &&
+    isCesium3DTileStencilCommand(command)
   );
 }
 
@@ -1820,11 +1841,11 @@ function needsTileFootprintDerivedCommand(command) {
   if (command.owner instanceof PointCloudEyeDomeLighting) {
     return false;
   }
-  // Opaque point clouds (EDL or not) are drawn once before the globe and write
+  // Opaque 3D Tiles point clouds are drawn once before the globe and write
   // the tiles stencil bit themselves — no separate geometry footprint.
   if (
     command.pass === Pass.CESIUM_3D_TILE &&
-    command.primitiveType === PrimitiveType.POINTS
+    isPreferTilesPointCloudCommand(command)
   ) {
     return false;
   }
@@ -1832,9 +1853,7 @@ function needsTileFootprintDerivedCommand(command) {
     return true;
   }
   return (
-    command.pass === Pass.TRANSLUCENT &&
-    command.primitiveType === PrimitiveType.POINTS &&
-    isCesium3DTileStencilCommand(command)
+    command.pass === Pass.TRANSLUCENT && isPreferTilesPointCloudCommand(command)
   );
 }
 
@@ -2857,20 +2876,18 @@ function executeCommands(scene, passState) {
     commandCount = frustumCommands.indices[Pass.TRANSLUCENT];
     for (let j = 0; j < commandCount; ++j) {
       const command = commands[j];
-      if (
-        command.primitiveType === PrimitiveType.POINTS &&
-        isCesium3DTileStencilCommand(command)
-      ) {
+      if (isPreferTilesPointCloudCommand(command)) {
         executeGeometryFootprint(command);
       }
     }
   }
 
   /**
-   * Draw opaque point clouds once before the globe (depth was just cleared).
-   * Non-EDL points write color/depth/stencil on the main FB. EDL points fill
-   * the offscreen G-buffer, then a cheap fullscreen pass stamps stencil.
-   * Skipped again in performCesium3DTilePass so the cloud is not drawn twice.
+   * Draw opaque 3D Tiles point clouds once before the globe (depth was just
+   * cleared). Non-EDL points write color/depth/stencil on the main FB. EDL
+   * points fill the offscreen G-buffer, then a cheap fullscreen pass stamps
+   * stencil. Skipped again in performCesium3DTilePass so the cloud is not
+   * drawn twice. Does not touch {@link PointPrimitiveCollection}.
    */
   function performPreferTilesPointsBeforeGlobe(frustumCommands) {
     if (!preferTilesDepth) {
@@ -2884,9 +2901,12 @@ function executeCommands(scene, passState) {
 
     for (let j = 0; j < commandCount; ++j) {
       const command = commands[j];
-      if (command.primitiveType === PrimitiveType.POINTS) {
+      if (isPreferTilesPointCloudCommand(command)) {
         executeCommand(command, scene, passState);
-      } else if (command.owner instanceof PointCloudEyeDomeLighting && processors.indexOf(command.owner) === -1) {
+      } else if (
+        command.owner instanceof PointCloudEyeDomeLighting &&
+        processors.indexOf(command.owner) === -1
+      ) {
         processors.push(command.owner);
       }
     }
@@ -2903,8 +2923,8 @@ function executeCommands(scene, passState) {
     let executed = 0;
     for (let j = 0; j < commandCount; ++j) {
       const command = commands[j];
-      // Opaque points already drew before the globe when preferTilesDepth.
-      if (preferTilesDepth && command.primitiveType === PrimitiveType.POINTS) {
+      // 3D Tiles point clouds already drew before the globe when preferTilesDepth.
+      if (preferTilesDepth && isPreferTilesPointCloudCommand(command)) {
         ++executed;
         continue;
       }
